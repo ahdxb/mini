@@ -6,43 +6,86 @@
 # Fallback:  https://gist.githubusercontent.com/ahdxb/7dc7377a171872ef677cedc8eff592bc/raw/mac-mini.sh
 # Source:    https://github.com/ahdxb/Sonar (private; published to Pages and Gist)
 #
-# USE
-#   bash mac-mini.sh | less                 Read this guide (Space, b, /, q).
-#   bash mac-mini.sh setup --profile home   Local setup; preserve home settings.
-#   bash mac-mini.sh setup --profile server Local setup for an unattended server.
-#   bash mac-mini.sh setup-remote --profile home
-#   bash mac-mini.sh setup-remote --profile server
-#                                          Configure an already prepared Mini over SSH.
-#   sudo bash mac-mini.sh check --profile home
-#   sudo bash mac-mini.sh check --profile server
+# WHAT THIS SCRIPT DOES
+#   Sets up and checks a Mac mini as a Tailscale exit node. An exit node lets
+#   your other Tailscale devices route their Internet traffic through this Mini.
+#   Both profiles use the Homebrew Tailscale system service and advertise the
+#   Mini as an exit node. You then approve it in Tailscale and select it on clients.
 #
-#   Without --profile, all modes default to home. Profiles are not saved; specify
-#   the same profile and options on later checks/reruns. Changing to home does
-#   not undo previous server changes. Help and check make no configuration changes.
-#   Options for setup, setup-remote and check:
-#     --always-on                   Set/require computer sleep=0 (display may sleep).
-#     --restart-after-power-failure Set/require power-failure restart=1.
-#   Server includes both power options. Home preserves them unless requested.
-#   Check also accepts --require-screen-sharing. Screen Sharing is optional otherwise.
-#   Local setup alone accepts --hostname NAME to explicitly change the Tailscale
-#   name. Without it, the existing name is kept. SSH setup never renames the Mini.
+# CHOOSE A PROFILE
+#   A profile determines which settings setup applies and which checks must pass.
+#   Choose it for how you use the Mini. Either profile supports local or SSH setup.
 #
-# 1. CHOOSE THE PROFILE AND CREATE THE ACCOUNT
+#   HOME (default) - for a Mini you also use for everyday work
+#     Keeps your existing FileVault, accounts, login, lock-screen, Computer Name,
+#     sleep and power-recovery choices. Existing Tailscale access preferences,
+#     including Tailscale SSH, are preserved too.
+#     FileVault ON and ordinary sleep settings are valid in home checks. Services
+#     are unavailable while the Mini sleeps, and a cold boot may need a disk unlock.
+#     You can explicitly request always-on operation and power recovery separately.
+#
+#   SERVER - for a dedicated unattended Mini, such as the one in France
+#     Prevents computer sleep and enables restart after power failure. Requires
+#     FileVault already OFF for this unattended cold-boot design. Turning it off
+#     is a manual choice that reduces protection against physical access to data.
+#     Local setup also selects native macOS SSH and allows incoming tailnet
+#     connections. SSH setup requires that access configuration to exist already
+#     and preserves it. Server checks require these unattended settings to pass.
+#
+#   Neither profile changes FileVault, accounts, login settings, Screen Sharing
+#   or the firewall automatically. Complete the manual preparation in step 2 first.
+#   Screen Sharing is optional in both profiles. A home Mini can also stay awake
+#   continuously; it does not need the server profile just because it is always on.
+#
+# COMMAND REFERENCE
+#   Read the guide
+#     bash mac-mini.sh | less
+#     Pager keys: Space = next page, b = back, / = search, q = quit.
+#
+#   Set up locally, after completing macOS preparation
+#     bash mac-mini.sh setup --profile home
+#     bash mac-mini.sh setup --profile server
+#
+#   Set up over SSH, on an already prepared Mini
+#     bash mac-mini.sh setup-remote --profile home
+#     bash mac-mini.sh setup-remote --profile server
+#     See "Terminal access over SSH" after step 7 for connection instructions
+#     and prerequisites. Remote setup never renames the Mini or restarts services.
+#
+#   Check settings without changing configuration
+#     sudo bash mac-mini.sh check --profile home
+#     sudo bash mac-mini.sh check --profile server
+#
+# OPTIONAL SETTINGS
+#   Add these options to setup, setup-remote or check as needed:
+#     --always-on
+#       Setup: prevent computer sleep. Check: require computer sleep disabled.
+#       The display may still sleep.
+#     --restart-after-power-failure
+#       Setup: enable power recovery. Check: require power recovery enabled.
+#   Server includes both options. Home preserves each setting unless requested.
+#
+#   Example: home setup with continuous availability and power recovery
+#     bash mac-mini.sh setup --profile home \
+#       --always-on --restart-after-power-failure
+#
+#   Check only: --require-screen-sharing
+#     Require the optional Screen Sharing service to accept connections.
+#   Local setup only: --hostname NAME
+#     Explicitly change the Tailscale name. Otherwise, keep the current name.
+#
+#   Without --profile, all modes use home. Profiles are not saved: repeat the
+#   same profile/options on later checks and reruns. Choosing home later does
+#   not undo settings previously applied by server or by explicit power options.
+#   Run setup as your administrator account without sudo; it requests sudo when
+#   needed. Run check with sudo, as shown above. Help and check make no changes.
+#
+# 1. CREATE OR KEEP THE ADMINISTRATOR ACCOUNT
+#   Choose home or server using the explanations above.
 #   For a new Mini, connect Ethernet, display, keyboard and mouse and complete
 #   Setup Assistant. Create a local administrator and store account recovery
 #   independently of this Mini. Do not import another Mini's Tailscale identity.
 #   For an existing Mini, keep its accounts and data; no clean rebuild is required.
-#   - server: dedicated unattended Mini, such as France. Requires FileVault OFF
-#     for this cold-boot design, prevents computer sleep and enables power recovery.
-#   - home: a Mini also used for everyday work. Preserves FileVault, accounts,
-#     Computer Name, sleep and power recovery settings. A display does not decide
-#     the profile: a home Mini may also run continuously using --always-on.
-#   Both profiles install/configure the same Homebrew Tailscale system daemon and
-#   advertise exit-node service. Home preserves existing Tailscale SSH and other
-#   access preferences. Local server setup explicitly selects native SSH and
-#   allows incoming tailnet connections. Remote setup never changes access settings.
-#   Neither profile changes FileVault, account permissions, login settings,
-#   Screen Sharing or the firewall automatically. These remain manual choices.
 #
 # 2. PREPARE MACOS COMPLETELY BEFORE RUNNING SETUP (MANUAL)
 #   Complete these tasks first, including any restarts. For an already prepared
