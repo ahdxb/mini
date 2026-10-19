@@ -31,10 +31,9 @@
 # | power failure      | --restart-after-power-failure |                               |
 # |                    | is requested                  |                               |
 # +--------------------+-------------------------------+-------------------------------+
-# | Tailscale SSH      | Keep the current setting      | Local setup sets to OFF, in   |
-# |                    |                               | favor of native macOS SSH;    |
-# |                    |                               | SSH setup requires it already |
-# |                    |                               | OFF                           |
+# | SSH method         | native by default; select     | native by default; select     |
+# |                    | --ssh tailscale if used       | --ssh tailscale if used       |
+# |                    | Preserve existing settings    | Preserve existing settings    |
 # +--------------------+-------------------------------+-------------------------------+
 # | Incoming           | Keep the setting; checks      | Local setup allows them; SSH  |
 # | connections over   | require connections to be     | setup requires them already   |
@@ -70,6 +69,22 @@
 #   Add these options to setup, setup-remote or check as needed:
 #     --always-on : prevent computer sleep
 #     --restart-after-power-failure : enable power recovery
+#     --ssh native|tailscale : choose SSH checks independently of the profile
+#       native (default): require macOS Remote Login and Tailscale SSH OFF.
+#       tailscale: require Tailscale SSH ON; native Remote Login is optional.
+#       Setup never enables/disables either SSH service or changes access rules.
+#       Prepare the selected method separately; a mismatch stops setup.
+#       Repeat this option on checks and reruns. Home Tailscale SSH users should
+#       select --ssh tailscale for setup; checks can also use --ssh any.
+#
+#   Check only: --ssh any
+#     Accept either native SSH or Tailscale SSH without requiring a specific
+#     method. This never changes settings and cannot verify remote authentication.
+#
+#   Example for the French Mini using its existing Tailscale SSH access:
+#     sudo bash ~/mac-mini.sh check --profile server --ssh tailscale
+#     sudo bash ~/mac-mini.sh check --profile server --ssh any
+#     bash ~/mac-mini.sh setup-remote --profile server --ssh tailscale
 #
 #   Check only: --require-screen-sharing
 #     Require the optional Screen Sharing service to accept connections.
@@ -96,9 +111,16 @@
 #     is sufficient. Keep router inbound protection; do not forward ports 22/5900.
 #   - Keep or choose a Computer Name. This is separate from --hostname, which
 #     changes only the Tailscale name.
-#   - Enable native Remote Login for the intended account in System Settings >
-#     General > Sharing. Choose permitted users. Full-disk access is unnecessary
-#     merely to connect. The script checks port 22 but never edits SSH permissions.
+#   - With --ssh native (default), enable Remote Login for the intended account
+#     in System Settings > General > Sharing. Choose permitted users and prepare
+#     Mac-account/key authentication. Tailscale SSH must already be OFF.
+#   - With --ssh tailscale, prepare the Homebrew Tailscale system service with
+#     Tailscale SSH already ON, and configure/test its network and SSH access
+#     rules. Native Remote Login is optional. Do not switch SSH methods through
+#     your only working connection; keep another tested access method available.
+#     See https://tailscale.com/docs/features/tailscale-ssh for preparation.
+#   - Setup preserves SSH settings in both profiles. Full-disk access is
+#     unnecessary merely to connect. The script never edits SSH permissions.
 #   - Screen Sharing is optional. Enable it only if wanted, restrict permitted
 #     users, and use normal Mac-account authentication. Leave the legacy VNC
 #     password off. Remote Management must be off to enable Screen Sharing.
@@ -174,19 +196,22 @@
 #   auth-key expiry is a different setting. Respect your existing access policy.
 #   If using custom access rules, permit the intended clients to access TCP 22
 #   (also 5900 if using Screen Sharing) and use exit nodes (autogroup:internet).
+#   Tailscale SSH additionally requires SSH access rules for the intended users.
 #   Advertising, approval and client selection are three separate steps.
 #   After completing this step, type DONE for setup to run local checks.
 #
 # 6. RUN CHECKS FOR THE SAME PROFILE AND OPTIONS
-#   Setup passes its profile/power options to the checker automatically.
+#   Setup passes its profile, SSH method and power options to the checker.
 #   To run it again locally or through SSH:
 #
 #     sudo bash ~/mac-mini.sh check --profile server
+#     sudo bash ~/mac-mini.sh check --profile server --ssh tailscale
+#     sudo bash ~/mac-mini.sh check --profile server --ssh any
 #     sudo bash ~/mac-mini.sh check --profile home
 #     sudo bash ~/mac-mini.sh check --profile home --always-on --restart-after-power-failure
 #
-#   Add --require-screen-sharing only if you require that service. Port 22 is
-#   required for both profiles; port 5900 is informational by default.
+#   Add --require-screen-sharing only if you require that service. Native port
+#   22 is required only with --ssh native; port 5900 is informational by default.
 #   PASS is green and FAIL red in color-capable terminals, including over SSH.
 #   Files and pipes receive plain text. Use NO_COLOR=1 to disable color.
 #   Informational update checks compare Homebrew itself with its latest stable
@@ -194,10 +219,13 @@
 #   These online lookups time out after 8 seconds each. They do not install,
 #   upgrade or restart anything. Available updates and lookup failures do not
 #   affect the check's exit status. Formula rebuild revisions are not compared.
-#   Server checks require FileVault fully off, sleep=0, power recovery=1 and
-#   Tailscale SSH off. Home reports FileVault and unselected power settings as
-#   information; it checks only explicitly selected power requirements. Home
-#   also reports the existing Tailscale SSH choice without requiring it off.
+#   Server checks require FileVault fully off, sleep=0 and power recovery=1.
+#   Home reports FileVault and unselected power settings as information; it
+#   checks only explicitly selected power requirements. Both profiles require
+#   the selected SSH method: native requires Tailscale SSH OFF; tailscale
+#   requires it ON. Check-only --ssh any accepts either available method.
+#   A local Tailscale SSH setting does not prove that a client
+#   can authenticate; test a NEW authorized connection from another device.
 #   Both profiles check Tailscale connectivity, exit-node advertisement/approval,
 #   incoming connections over Tailscale and the Homebrew system service.
 #   Exit 0 means local checks passed, 1 means a failure, and 2 means incomplete
@@ -212,8 +240,11 @@
 #   From another device on the same tailnet, preferably on a different Internet
 #   connection (such as a hotspot):
 #   - Run "ssh ACCOUNT@TAILSCALE_IP" using the Mini's short account name. Verify
-#     the host fingerprint against an independently recorded value. Locally:
+#     the selected method and authentication. With native SSH, verify the host
+#     fingerprint against an independently recorded value. Locally:
 #       sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+#     Tailscale SSH uses its own host keys and Tailscale identity/access rules;
+#     the native sshd fingerprint above does not verify that service.
 #   - If Screen Sharing is enabled, test "vnc://TAILSCALE_IP" using the Mini's
 #     account credentials. A working MagicDNS name can replace the Tailscale IP.
 #   - Select this Mini as your client's exit node. Test HTTPS browsing, DNS and
@@ -232,12 +263,14 @@
 #   Do not rely on either Mini remotely until its intended operating tests pass.
 #
 # TERMINAL ACCESS OVER SSH (AFTER INITIAL PREPARATION)
-#   Remote setup works with either profile. The account, native Remote Login,
-#   Homebrew formula and connected Homebrew Tailscale ROOT boot service must
-#   already exist. Server additionally requires FileVault fully off and Tailscale
-#   SSH off. Home preserves both choices. Both require incoming connections over
-#   Tailscale already allowed. Remote setup does not bootstrap, migrate or restart
-#   Tailscale.
+#   Remote setup works with either profile and either selected SSH method.
+#   The account, selected SSH method, Homebrew formula and connected Homebrew
+#   Tailscale ROOT boot service must already exist. Native (default) requires
+#   Remote Login and Tailscale SSH OFF. --ssh tailscale requires Tailscale SSH ON
+#   and accepts native Remote Login OFF. Neither choice changes SSH settings.
+#   Server additionally requires FileVault fully off; home preserves FileVault.
+#   Both require incoming connections over Tailscale already allowed. Remote
+#   setup does not bootstrap, migrate or restart Tailscale.
 #   A logged-in desktop is unnecessary once macOS and its disk are accessible.
 #   This setup command is for an already unlocked Mac. FileVault SSH unlock is
 #   a separate startup procedure; see "FileVault and recovery" below.
@@ -245,12 +278,15 @@
 #
 #     ssh -t ACCOUNT@TAILSCALE_IP
 #
-#   Verify the SSH fingerprint. A reachable LAN IP or working MagicDNS name can
+#   Verify the selected SSH service's identity. Native SSH can also use a LAN IP;
+#   Tailscale SSH requires the Tailscale address. A working MagicDNS name can
 #   replace TAILSCALE_IP. In the resulting terminal ON THE MINI:
 #
 #     curl -fsSLo ~/mac-mini.sh https://ahdxb.github.io/mini/mac-mini.sh
 #     less ~/mac-mini.sh
 #     bash ~/mac-mini.sh setup-remote --profile server
+#     # For an existing Tailscale SSH connection, use instead:
+#     bash ~/mac-mini.sh setup-remote --profile server --ssh tailscale
 #
 #   For the home Mini, use "setup-remote --profile home" instead; add either home
 #   power option only if wanted. Do not prefix setup-remote with sudo. It verifies
@@ -387,6 +423,7 @@ fi
 case "$MODE" in setup|setup-remote|check) ;; *) die 'Choose help, setup, setup-remote, or check.' ;; esac
 shift
 PROFILE=home
+SSH_MODE=native
 ALWAYS_ON=false
 POWER_RECOVERY=false
 REQUIRE_SCREEN_SHARING=false
@@ -396,6 +433,9 @@ while [ $# -gt 0 ]; do
     --profile)
       [ $# -ge 2 ] || die '--profile requires home or server.'
       PROFILE=$2; shift 2 ;;
+    --ssh)
+      [ $# -ge 2 ] || die '--ssh requires native, tailscale, or any (check only).'
+      SSH_MODE=$2; shift 2 ;;
     --always-on) ALWAYS_ON=true; shift ;;
     --restart-after-power-failure) POWER_RECOVERY=true; shift ;;
     --require-screen-sharing)
@@ -414,6 +454,14 @@ case "$PROFILE" in
   server) ALWAYS_ON=true; POWER_RECOVERY=true ;;
   home) ;;
   *) die '--profile must be home or server.' ;;
+esac
+case "$SSH_MODE" in
+  native) SSH_ENABLED=false ;;
+  tailscale) SSH_ENABLED=true ;;
+  any)
+    [ "$MODE" = check ] || die '--ssh any is supported only in check mode.'
+    SSH_ENABLED='' ;;
+  *) die '--ssh must be native, tailscale, or any (check only).' ;;
 esac
 [ "$(uname -s)" = Darwin ] || die 'This script is for macOS.'
 
@@ -506,6 +554,15 @@ read_preferences() {
   printf '"_normalized":true}\n' >>"$output"
 }
 
+# Verify the chosen SSH preference without changing either access method.
+require_selected_ssh() {
+  local value
+  value=$(plutil -extract ssh raw -expect bool -o - "$1" 2>/dev/null) || die 'Cannot verify Tailscale SSH preference. No SSH settings were changed.'
+  case "$value" in true|false) ;; *) die 'Unrecognized Tailscale SSH preference. No SSH settings were changed.' ;; esac
+  [ "$value" = "$SSH_ENABLED" ] ||
+    die "Selected --ssh $SSH_MODE requires Tailscale SSH=$SSH_ENABLED. Setup preserves SSH settings; prepare the selected method separately or choose the method already in use."
+}
+
 # Refuse common competing installations without attempting a migration.
 check_tailscale_installation() {
   local other
@@ -551,6 +608,7 @@ apply_power_settings() {
 }
 show_profile_plan() {
   printf 'Profile: %s\n' "$PROFILE"
+  printf 'SSH method: %s. Preserve existing SSH settings; never enable or disable SSH automatically.\n' "$SSH_MODE"
   if [ "$PROFILE" = server ]; then
     printf 'FileVault must already be OFF; accounts and security settings remain manual.\n'
   else
@@ -571,7 +629,7 @@ show_profile_plan() {
 # explicit per invocation, so this does not depend on sudo preserving variables.
 finish_setup() {
   local result=0
-  local check_args=(check --profile "$PROFILE")
+  local check_args=(check --profile "$PROFILE" --ssh "$SSH_MODE")
   if [ "$ALWAYS_ON" = true ]; then check_args+=(--always-on); fi
   if [ "$POWER_RECOVERY" = true ]; then check_args+=(--restart-after-power-failure); fi
   manual_step 5
@@ -649,7 +707,7 @@ if [ "$MODE" = check ]; then
   # Keep stderr privately. On failure, append its first nonempty line (up to 240 characters);
   # with no detail, use the generic error message.
   # Signal exit codes alone are not treated as proof of a timeout.
-  printf 'Local checks, %s (profile: %s)\n' "$(date '+%Y-%m-%d %H:%M %Z')" "$PROFILE"
+  printf 'Local checks, %s (profile: %s; SSH: %s)\n' "$(date '+%Y-%m-%d %H:%M %Z')" "$PROFILE" "$SSH_MODE"
 
   # Check that Homebrew can start. Asking for its version does not install or update software.
   if "$BREW" --version >/dev/null 2>&1; then
@@ -664,6 +722,9 @@ if [ "$MODE" = check ]; then
   if [ -n "$OTHER_TS" ] && [ "$OTHER_TS" != "$TS" ]; then
     printf 'INFO     Another Tailscale CLI is available at %s\n' "$OTHER_TS"
   fi
+
+  SSH_PREF=unknown
+  TS_SSH_RUNNING=unknown
 
   # Recognize the app in its usual installation location instead of calling it
   # missing. Its presence does not prove it is running. The intended setup uses
@@ -684,6 +745,15 @@ if [ "$MODE" = check ]; then
       expect "$TMP/status" Self.Online true 'Tailscale connected to control server'
                                     # PASS if this Mac is currently connected to Tailscale's servers
       expect "$TMP/status" Self.ExitNodeOption true 'Exit node advertised and approved (reported by Tailscale)'
+      if [ "$SSH_MODE" = any ]; then
+        TS_BACKEND=$(field "$TMP/status" BackendState || true)
+        TS_ONLINE=$(field "$TMP/status" Self.Online || true)
+        if [ "$TS_BACKEND" = Running ] && [ "$TS_ONLINE" = true ]; then
+          TS_SSH_RUNNING=true
+        elif [ -n "$TS_BACKEND" ] && { [ "$TS_ONLINE" = true ] || [ "$TS_ONLINE" = false ]; }; then
+          TS_SSH_RUNNING=false
+        fi
+      fi
                                     # PASS if Tailscale says this Mac is an approved exit node.
       printf 'Identity: %s / %s\n' "$(field "$TMP/status" CurrentTailnet.Name || printf unknown)" \
         "$(field "$TMP/status" Self.DNSName || printf unknown)"
@@ -696,14 +766,15 @@ if [ "$MODE" = check ]; then
                                     # Copy Tailscale's settings as JSON into a file
       expect "$TMP/prefs" advertise-exit-node true 'Exit node advertised'
                                     # PASS if this Mac is set to offer itself as an exit node
-      if [ "$PROFILE" = server ]; then
-        expect "$TMP/prefs" ssh false 'Server native SSH baseline (Tailscale SSH off)'
+      SSH_PREF=$(plutil -extract ssh raw -expect bool -o - "$TMP/prefs" 2>/dev/null) || SSH_PREF=unknown
+      if [ "$SSH_MODE" = any ]; then
+        : # Report either available method after probing native SSH below.
+      elif [ "$SSH_PREF" = true ] || [ "$SSH_PREF" = false ]; then
+        if [ "$SSH_PREF" = "$SSH_ENABLED" ]; then
+          pass "Selected SSH method: $SSH_MODE (Tailscale SSH=$SSH_ENABLED)"
+        else fail "Selected SSH method: $SSH_MODE requires Tailscale SSH=$SSH_ENABLED"; fi
       else
-        SSH_PREF=$(field "$TMP/prefs" ssh || true)
-        case "$SSH_PREF" in
-          true|false) printf 'INFO     Tailscale SSH=%s (home choice preserved)\n' "$SSH_PREF" ;;
-          *) unknown 'Cannot read Tailscale SSH preference' ;;
-        esac
+        unknown 'Cannot read Tailscale SSH preference'
       fi
       expect "$TMP/prefs" shields-up false 'Incoming tailnet connections allowed'
                                     # PASS if this Mac accepts connections from other tailnet devices
@@ -753,11 +824,25 @@ if [ "$MODE" = check ]; then
   elif [ "$PROFILE" = server ]; then unknown 'Cannot read FileVault status';
   else printf 'INFO     Cannot read FileVault status (home choice preserved)\n'; fi
 
-  # Native SSH is required. Screen Sharing is optional unless requested.
+  # The selected method determines whether native SSH is required.
   # Local TCP probes do not test authentication or reachability from a client.
-  if nc -z -G 3 127.0.0.1 22 >/dev/null 2>&1; then
-    pass 'Local port 22 accepts TCP (SSH)'
-  else fail 'Local port 22 unavailable; check Remote Login'; fi
+  if [ "$SSH_MODE" = any ]; then
+    if nc -z -G 3 127.0.0.1 22 >/dev/null 2>&1; then
+      pass 'SSH method any: native SSH accepts TCP on localhost port 22'
+    elif [ "$SSH_PREF" = true ] && [ "$TS_SSH_RUNNING" = true ]; then
+      pass 'SSH method any: Tailscale SSH enabled on a running, connected node'
+    elif [ "$SSH_PREF" = unknown ] || { [ "$SSH_PREF" = true ] && [ "$TS_SSH_RUNNING" = unknown ]; }; then
+      unknown 'Native SSH unavailable; cannot verify Tailscale SSH availability'
+    else fail 'Neither native SSH nor Tailscale SSH is available'; fi
+    printf 'MANUAL   Test a new SSH connection from an authorized client; local checks do not verify SSH policy or authentication.\n'
+  elif [ "$SSH_MODE" = native ]; then
+    if nc -z -G 3 127.0.0.1 22 >/dev/null 2>&1; then
+      pass 'Local port 22 accepts TCP (SSH)'
+    else fail 'Local port 22 unavailable; check Remote Login'; fi
+  else
+    printf 'INFO     Native SSH on localhost port 22 is optional with --ssh tailscale.\n'
+    printf 'MANUAL   Test a new Tailscale SSH connection from an authorized client; local checks do not verify SSH policy or authentication.\n'
+  fi
   if nc -z -G 3 127.0.0.1 5900 >/dev/null 2>&1; then
     pass 'Local port 5900 accepts TCP (Screen Sharing)'
   elif [ "$REQUIRE_SCREEN_SHARING" = true ]; then
@@ -888,18 +973,15 @@ if [ "$MODE" = setup-remote ]; then
       [ -n "$(field "$TMP/status" "$value")" ] || die "Cannot verify Tailscale identity field $value."
     done
     read_preferences "$TMP/prefs" sudo -n "$TS" || die 'Cannot read Tailscale preferences. No configuration was changed.'
-    # Never disable Tailscale SSH through a session that may depend on it.
-    # Server requires native SSH already selected; home preserves either choice.
-    value=$(field "$TMP/prefs" ssh) || die 'Cannot verify Tailscale SSH preference.'
-    case "$value" in true|false) ;; *) die 'Unrecognized Tailscale SSH preference.' ;; esac
-    if [ "$PROFILE" = server ] && [ "$value" != false ]; then
-      die 'Server profile requires native SSH already selected. Resolve locally; remote setup will not disable Tailscale SSH.'
-    fi
+    # Require the chosen method without changing the connection used for setup.
+    require_selected_ssh "$TMP/prefs"
     [ "$(field "$TMP/prefs" shields-up)" = false ] ||
       die 'Incoming tailnet connections must already be allowed. Remote setup will not change access settings.'
     value=$(field "$TMP/prefs" advertise-exit-node) || die 'Cannot read exit-node advertisement preference.'
     case "$value" in true|false) ;; *) die 'Unrecognized exit-node advertisement preference.' ;; esac
-    nc -z -G 3 127.0.0.1 22 >/dev/null 2>&1 || die 'Native SSH must already listen on port 22. Resolve Remote Login locally.'
+    if [ "$SSH_MODE" = native ]; then
+      nc -z -G 3 127.0.0.1 22 >/dev/null 2>&1 || die 'Native SSH must already listen on port 22. Resolve Remote Login locally.'
+    fi
     if [ "$PROFILE" = server ]; then
       sudo -n fdesetup status >"$TMP/filevault" || die 'Cannot verify FileVault. Complete local preparation first.'
       grep -Fxq 'FileVault is Off.' "$TMP/filevault" || die 'Server profile requires FileVault fully off. Resolve locally first.'
@@ -950,7 +1032,7 @@ REMOTE_PLAN
 fi
 
 # LOCAL SETUP: macOS/account/Sharing preparation is complete before launch.
-# Home preserves existing preferences; server selects its documented baseline.
+# Both profiles preserve SSH settings and require the selected method prepared.
 if [ "$MODE" = setup ]; then
   set -e
   [ -t 0 ] || die 'Run setup in an interactive terminal.'
@@ -963,7 +1045,20 @@ if [ "$MODE" = setup ]; then
   umask 077
   TMP=$(mktemp -d)
   trap 'rm -rf "$TMP"' EXIT
-  nc -z -G 3 127.0.0.1 22 >/dev/null 2>&1 || die 'Complete step 2 first: native Remote Login must already listen on port 22.'
+  if [ "$SSH_MODE" = native ]; then
+    nc -z -G 3 127.0.0.1 22 >/dev/null 2>&1 || die 'Complete step 2 first: native Remote Login must already listen on port 22.'
+  fi
+  # Verify an existing installation before any setup changes. Tailscale SSH
+  # must be prepared separately; selecting it never bootstraps or switches SSH.
+  if [ -n "$BREW" ] && [ -x "${BREW%/brew}/tailscale" ] &&
+     [ -f /Library/LaunchDaemons/homebrew.mxcl.tailscale.plist ] &&
+     sudo -n launchctl print system/homebrew.mxcl.tailscale >"$TMP/service" 2>/dev/null &&
+     grep -q 'state = running' "$TMP/service"; then
+    read_preferences "$TMP/prefs" sudo -n "${BREW%/brew}/tailscale" || die 'Cannot verify existing SSH settings. No configuration was changed.'
+    require_selected_ssh "$TMP/prefs"
+  elif [ "$SSH_MODE" = tailscale ]; then
+    die 'Prepare the Homebrew Tailscale installation, running system service and Tailscale SSH first. Setup will not switch SSH methods.'
+  fi
   if [ "$PROFILE" = server ]; then
     sudo -n fdesetup status >"$TMP/filevault" || die 'Cannot verify FileVault. Complete macOS preparation first.'
     grep -Fxq 'FileVault is Off.' "$TMP/filevault" || die 'Server profile requires FileVault fully off. Complete step 2 first.'
@@ -980,7 +1075,7 @@ connects/enrolls if needed, and advertises exit-node service. No existing formul
 is upgraded. No accounts, FileVault, login, Sharing or firewall settings are changed.
 PLAN
   if [ "$PROFILE" = server ]; then
-    printf 'Local server setup selects native SSH (Tailscale SSH off) and allows incoming tailnet connections.\n'
+    printf 'Local server setup preserves SSH settings and allows incoming tailnet connections.\n'
   else
     printf 'Home setup preserves existing Tailscale SSH, incoming-access, DNS and routing preferences.\n'
   fi
@@ -1018,10 +1113,13 @@ PLAN
     sudo "$TS" up
   fi
 
+  read_preferences "$TMP/prefs" sudo -n "$TS" || die 'Cannot verify SSH settings; no SSH settings were changed.'
+  require_selected_ssh "$TMP/prefs"
+
   # A nonempty array is compatible with macOS Bash 3.2 and nounset. Home changes
   # only advertisement, plus any explicit hostname/power choices.
   TS_ARGS=(set --advertise-exit-node=true)
-  if [ "$PROFILE" = server ]; then TS_ARGS+=(--ssh=false --shields-up=false); fi
+  if [ "$PROFILE" = server ]; then TS_ARGS+=(--shields-up=false); fi
   if [ -n "$NAME" ]; then TS_ARGS+=(--hostname="$NAME"); fi
   sudo -v
   sudo -n "$TS" "${TS_ARGS[@]}"
