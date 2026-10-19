@@ -6,23 +6,22 @@
 # Fallback:  https://gist.githubusercontent.com/ahdxb/7dc7377a171872ef677cedc8eff592bc/raw/mac-mini.sh
 # Source:    https://github.com/ahdxb/Sonar (private; published to Pages and Gist)
 #
-# WHAT THIS SCRIPT DOES
-#   Sets up and checks a Mac mini as a Tailscale exit node. An exit node lets
-#   your other Tailscale devices route their Internet traffic through this Mini.
-#   Both profiles use the Homebrew Tailscale system service and advertise the
-#   Mini as an exit node. You then approve it in Tailscale and select it on clients.
-#
-# CHOOSE A PROFILE
+# PROFILES
 #   A profile determines which settings setup applies and which checks must pass.
 #   Choose it for how you use the Mini. Either profile supports local or SSH setup.
+#   Both profiles use the Homebrew Tailscale system service and advertise the
+#   Mini as an exit node. You then approve it in Tailscale and select it on clients.
+
 #
-#   HOME (default) - for a Mini you also use for everyday work
-#     Keeps your existing FileVault, accounts, login, lock-screen, Computer Name,
+#   HOME (default) -- Mixed use: Tailscale exit node + everyday computer
+#     Keeps existing FileVault, accounts, login, lock-screen, computer name,
 #     sleep and power-recovery choices. Existing Tailscale access preferences,
 #     including Tailscale SSH, are preserved too.
-#     FileVault ON and ordinary sleep settings are valid in home checks. Services
-#     are unavailable while the Mini sleeps, and a cold boot may need a disk unlock.
-#     You can explicitly request always-on operation and power recovery separately.
+#     FileVault ON and ordinary sleep settings are valid in home checks.
+#     Services are unavailable while the Mini sleeps, and a cold boot may
+#     need a disk unlock.
+#     Add --always-on and --restart-after-power-failure to improve availability.
+#     These power options do not unlock FileVault or guarantee recovery.
 #
 #   SERVER - for a dedicated unattended Mini, such as the one in France
 #     Prevents computer sleep and enables restart after power failure. Requires
@@ -31,6 +30,8 @@
 #     Local setup also selects native macOS SSH and allows incoming tailnet
 #     connections. SSH setup requires that access configuration to exist already
 #     and preserves it. Server checks require these unattended settings to pass.
+#     See "FileVault and recovery" below for the security tradeoff and the
+#     macOS 26 SSH-unlock alternative. The server requirement remains OFF.
 #
 #   Neither profile changes FileVault, accounts, login settings, Screen Sharing
 #   or the firewall automatically. Complete the manual preparation in step 2 first.
@@ -108,6 +109,8 @@
 #   Server only:
 #   - FileVault OFF; verify it is fully off before setup. This reduces protection
 #     against physical access to data. Keep sensitive personal data off this server.
+#     macOS 26 SSH unlock is a separate recovery design; this script still requires
+#     FileVault OFF for server. See "FileVault and recovery" below.
 #   - Turn automatic login and Guest User off. Require a password immediately
 #     after screen lock. Let the display sleep; setup prevents computer sleep.
 #   - If Energy offers "Start up when power is connected" > "Always", choose it
@@ -115,7 +118,9 @@
 #   Home:
 #   - Keep your existing FileVault, account, login, lock-screen and power choices.
 #     FileVault ON is valid and is not a failed home check. An unattended cold
-#     boot may require someone to unlock the disk before remote services return.
+#     boot requires an unlock before the Tailscale daemon can return. On supported
+#     Macs, this may be possible over SSH using a separate network path; see
+#     "FileVault and recovery" below.
 #   - An exit node is unavailable while the computer sleeps. Choose --always-on
 #     only if continuous availability is wanted. Power recovery is a separate
 #     opt-in: --restart-after-power-failure. Neither option changes FileVault.
@@ -212,7 +217,9 @@
 #     window without desktop login, and repeat the remote tests. Disconnect the
 #     display and repeat in the actual headless configuration before deployment.
 #   - Home: test the recovery behavior you chose. With FileVault on, arrange a
-#     disk unlock after cold boot; do not expect unattended remote recovery.
+#     disk unlock locally or, on supported Macs, over the separate SSH path
+#     described under "FileVault and recovery". Authentication is still needed;
+#     test the actual cold-boot/power-recovery case before relying on it.
 #     If sleep is allowed, verify and accept that services are unavailable asleep.
 #   - Test chosen power-recovery behavior in a planned local maintenance window.
 #     Never pull power during updates or writes. Normal shutdown does not test
@@ -226,6 +233,8 @@
 #   SSH off. Home preserves both choices. Both require incoming tailnet connections
 #   already allowed. Remote setup does not bootstrap, migrate or restart Tailscale.
 #   A logged-in desktop is unnecessary once macOS and its disk are accessible.
+#   This setup command is for an already unlocked Mac. FileVault SSH unlock is
+#   a separate startup procedure; see "FileVault and recovery" below.
 #   From your other computer (connected to the same tailnet):
 #
 #     ssh -t ACCOUNT@TAILSCALE_IP
@@ -249,6 +258,49 @@
 #   rerun the same command/options; it rechecks live state and skips completed work.
 #   Do not run concurrent setup sessions or change Tailscale settings during setup.
 #   Working access now cannot guarantee access after network/power/OS failure.
+#
+# FILEVAULT AND RECOVERY
+#   FileVault protects access to stored data using your credentials. With it ON,
+#   startup can wait for an authorized disk unlock. While the data volume is
+#   locked, this Mini's Homebrew Tailscale daemon and exit-node service are not
+#   available. A Mac can therefore power on and still be unreachable over its
+#   own Tailscale connection until someone unlocks it.
+#
+#   The server profile requires FileVault OFF so this setup can recover without
+#   an unlock or an extra recovery device after a cold boot/power loss. Turning
+#   it off reduces protection against physical access to stored data. It does
+#   not turn on automatic desktop login or remove normal login/SSH authentication.
+#   This is the tradeoff of this server design, not a universal requirement for
+#   running a Mac server. The script never changes FileVault itself.
+#
+#   macOS 26 or later: SSH-unlock exception on Apple silicon
+#     Apple supports unlocking FileVault over SSH after a restart when Remote
+#     Login was enabled beforehand and suitable networking is available. You
+#     still authenticate with credentials authorized to unlock FileVault.
+#     This native startup SSH service is separate from Tailscale SSH and from
+#     running "setup-remote" after the Mac is unlocked.
+#
+#   A separate network path is necessary when accessing it from another site
+#     The locked Mini cannot provide its own Tailscale connection or exit node.
+#     Reach its LAN address through an independent, available path instead:
+#     - Another always-on device at that site acting as a Tailscale subnet router.
+#     - A suitable VPN on the site's router or another independent VPN gateway.
+#     A device already on the same LAN can connect directly if networking permits.
+#
+#       Your computer -> separate VPN/subnet router -> Mini's LAN IP -> SSH unlock
+#
+#     The separate router/gateway and site network must also survive or recover
+#     from the outage. After the unlock, macOS can start the normal Tailscale
+#     daemon and exit-node service. The Mini's own Tailscale IP is not a route to
+#     its pre-unlock SSH service. Do not expose SSH by forwarding Internet port 22.
+#
+#   SSH unlock enables remote intervention; it does not make recovery automatic.
+#   Verify hardware/OS support, authorized credentials, pre-unlock networking and
+#   the actual recovery scenario with local assistance available. This script
+#   neither configures nor validates that alternative recovery path. Its server
+#   setup and checks still require FileVault fully OFF, including on macOS 26+.
+#   Home continues to preserve FileVault; plan and test its unlock path yourself.
+#   See the Apple FileVault and Tailscale subnet-router sources in REFERENCES.
 #
 # REPLACEMENT DETAILS
 #   Keep this script and account/MFA recovery independently of both Minis. Use
@@ -291,6 +343,9 @@
 #   https://tailscale.com/docs/reference/tailscale-cli
 #   https://tailscale.com/docs/features/exit-nodes
 #   https://support.apple.com/guide/mac-help/flvlt001/mac
+#   https://support.apple.com/en-ca/guide/security/sec8447f5049/web
+#   https://tailscale.com/docs/features/subnet-routers
+#   https://www.youtube.com/watch?v=833pTn_3HYI
 #   https://support.apple.com/en-gb/guide/mac-help/mchlp1066/mac
 #   https://support.apple.com/en-au/125517
 # END GUIDE
