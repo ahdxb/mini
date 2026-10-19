@@ -189,6 +189,11 @@
 #   required for both profiles; port 5900 is informational by default.
 #   PASS is green and FAIL red in color-capable terminals, including over SSH.
 #   Files and pipes receive plain text. Use NO_COLOR=1 to disable color.
+#   Informational update checks compare Homebrew itself with its latest stable
+#   GitHub release and Tailscale with the stable Homebrew formula version.
+#   These online lookups time out after 8 seconds each. They do not install,
+#   upgrade or restart anything. Available updates and lookup failures do not
+#   affect the check's exit status. Formula rebuild revisions are not compared.
 #   Server checks require FileVault fully off, sleep=0, power recovery=1 and
 #   Tailscale SSH off. Home reports FileVault and unselected power settings as
 #   information; it checks only explicitly selected power requirements. Home
@@ -462,6 +467,45 @@ run_timed() {
   return "$result"
 }
 
+# Read preferences on both newer CLIs and releases without "get" (e.g. 1.98.8).
+# Normalize only the three fields used below. Missing or unexpected debug fields
+# stay absent, so checks remain UNKNOWN and remote preflight refuses to proceed.
+read_preferences() {
+  local output=$1 pair value count index route v4=false v6=false valid=true advertised=''
+  shift
+  if run_timed "$@" get --json >"$output" 2>"$output.get.err"; then return 0; fi
+  if ! grep -Fq 'unknown subcommand: get' "$output.get.err"; then
+    cat "$output.get.err" >&2
+    return 1
+  fi
+  run_timed "$@" debug prefs >"$output.debug" || return 1
+  printf '{' >"$output"
+  for pair in ssh:RunSSH shields-up:ShieldsUp; do
+    if value=$(plutil -extract "${pair#*:}" raw -expect bool -o - "$output.debug" 2>/dev/null); then
+      case "$value" in
+        true|false) printf '"%s":%s,' "${pair%:*}" "$value" >>"$output" ;;
+      esac
+    fi
+  done
+  if count=$(plutil -extract AdvertiseRoutes raw -expect array -o - "$output.debug" 2>/dev/null); then
+    for ((index=0; index<count; index++)); do
+      if route=$(plutil -extract "AdvertiseRoutes.$index" raw -expect string -o - "$output.debug" 2>/dev/null); then
+        case "$route" in 0.0.0.0/0) v4=true ;; ::/0) v6=true ;; esac
+      else valid=false; fi
+    done
+    if [ "$valid" = true ]; then
+      advertised=false
+      if [ "$v4" = true ] && [ "$v6" = true ]; then advertised=true; fi
+    fi
+  elif [ "$(plutil -type AdvertiseRoutes "$output.debug" 2>/dev/null)" = '(any)' ]; then
+    # plutil reports JSON null as (any); a null Go route slice advertises nothing.
+    advertised=false
+  fi
+  if [ -n "$advertised" ]; then printf '"advertise-exit-node":%s,' "$advertised" >>"$output"; fi
+  # A sentinel avoids trailing commas without copying unrelated debug data.
+  printf '"_normalized":true}\n' >>"$output"
+}
+
 # Refuse common competing installations without attempting a migration.
 check_tailscale_installation() {
   local other
@@ -601,7 +645,7 @@ if [ "$MODE" = check ]; then
   # Failed queries/timeouts are UNKNOWN; inspect returned fields individually.
   # Display the tailnet/name for manual verification.
   # Check saved preferences separately, since a running node can still be configured incorrectly.
-  # An older CLI without "get --json" produces UNKNOWN instead of an assumed pass.
+  # Older CLIs fall back to validated fields from "debug prefs".
   # Keep stderr privately. On failure, append its first nonempty line (up to 240 characters);
   # with no detail, use the generic error message.
   # Signal exit codes alone are not treated as proof of a timeout.
@@ -648,7 +692,7 @@ if [ "$MODE" = check ]; then
       DETAIL=$(awk 'NF {print substr($0, 1, 240); exit}' "$TMP/status.err")
       unknown "Cannot read Tailscale status${DETAIL:+: $DETAIL}"
     fi
-    if read_tailscale get --json >"$TMP/prefs" 2>"$TMP/prefs.err"; then
+    if read_preferences "$TMP/prefs" "$TS" 2>"$TMP/prefs.err"; then
                                     # Copy Tailscale's settings as JSON into a file
       expect "$TMP/prefs" advertise-exit-node true 'Exit node advertised'
                                     # PASS if this Mac is set to offer itself as an exit node
@@ -720,6 +764,59 @@ if [ "$MODE" = check ]; then
     fail 'Local port 5900 unavailable; Screen Sharing was explicitly required'
   else printf 'INFO     Screen Sharing unavailable on port 5900 (optional)\n'; fi
 
+  # Query release metadata directly instead of running brew update/outdated,
+  # which can refresh the installation or package caches. Only TMP is written.
+  report_update() {
+    local label=$1 installed=$2 latest=$3 comparison
+    if ! [[ "$installed" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+       ! [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      printf 'INFO     %s update check unavailable (cannot compare stable release versions)\n' "$label"
+      return
+    fi
+    comparison=$(awk -v current="$installed" -v latest="$latest" 'BEGIN {
+      split(current, a, "."); split(latest, b, ".")
+      for (i=1; i<=3; i++) {
+        if (a[i]+0 < b[i]+0) { print "older"; exit }
+        if (a[i]+0 > b[i]+0) { print "newer"; exit }
+      }
+      print "same"
+    }')
+    case "$comparison" in
+      older) printf 'INFO     %s update available: %s -> %s\n' "$label" "$installed" "$latest" ;;
+      same) printf 'INFO     %s up to date: %s\n' "$label" "$installed" ;;
+      newer) printf 'INFO     %s installed %s is newer than latest stable %s\n' "$label" "$installed" "$latest" ;;
+    esac
+  }
+  brew_update_version() (
+    # Root may not see Homebrew's Git version. Query as the original sudo user,
+    # from an accessible directory, without changing the main check's context.
+    cd / || return 1
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+      run_timed sudo -n -H -u "$SUDO_USER" env HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 "$BREW" --version
+    else
+      run_timed env HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 "$BREW" --version
+    fi
+  )
+  fetch_release() {
+    curl -q --fail --silent --show-error --location --proto '=https' \
+      --connect-timeout 3 --max-time 8 "$1" -o "$2"
+  }
+  printf '\nSoftware updates (informational; no changes applied)\n'
+  if brew_update_version >"$TMP/brew-version" 2>"$TMP/brew-version.err" &&
+     fetch_release https://api.github.com/repos/Homebrew/brew/releases/latest "$TMP/brew-release" 2>"$TMP/brew-release.err"; then
+    INSTALLED_VERSION=$(awk 'NR==1 && $1=="Homebrew" {print $2}' "$TMP/brew-version")
+    LATEST_VERSION=$(field "$TMP/brew-release" tag_name || true)
+    report_update Homebrew "$INSTALLED_VERSION" "${LATEST_VERSION#v}"
+  else printf 'INFO     Homebrew update check unavailable (version query or online lookup failed)\n'; fi
+  if [ -d /Applications/Tailscale.app ] || [ ! -x "$TS" ]; then
+    printf 'INFO     Tailscale update check skipped (expected Homebrew-only installation unavailable)\n'
+  elif read_tailscale version >"$TMP/ts-version" 2>"$TMP/ts-version.err" &&
+       fetch_release https://formulae.brew.sh/api/formula/tailscale.json "$TMP/ts-release" 2>"$TMP/ts-release.err"; then
+    INSTALLED_VERSION=$(head -n 1 "$TMP/ts-version")
+    LATEST_VERSION=$(field "$TMP/ts-release" versions.stable || true)
+    report_update 'Tailscale (Homebrew)' "$INSTALLED_VERSION" "$LATEST_VERSION"
+  else printf 'INFO     Tailscale update check unavailable (version query or online lookup failed)\n'; fi
+
   # Summarize and return a result
   # -----------------------------
   # List the tests that still need a person or another device. Confirmed failures
@@ -790,7 +887,7 @@ if [ "$MODE" = setup-remote ]; then
     for value in CurrentTailnet.Name Self.DNSName; do
       [ -n "$(field "$TMP/status" "$value")" ] || die "Cannot verify Tailscale identity field $value."
     done
-    run_timed sudo -n "$TS" get --json >"$TMP/prefs" || die 'Cannot read Tailscale preferences. No configuration was changed.'
+    read_preferences "$TMP/prefs" sudo -n "$TS" || die 'Cannot read Tailscale preferences. No configuration was changed.'
     # Never disable Tailscale SSH through a session that may depend on it.
     # Server requires native SSH already selected; home preserves either choice.
     value=$(field "$TMP/prefs" ssh) || die 'Cannot verify Tailscale SSH preference.'
