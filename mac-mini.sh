@@ -1,109 +1,47 @@
 #!/bin/bash
 # START GUIDE
-# Always-on Mac mini: setup, check, and replacement notes.
-# Updated 2026-10-19.
+# Always-on Mac mini with Tailscale exit node: setup, check, and replacement notes.
+# Last updated 2026-10-19.
 # Download:  https://ahdxb.github.io/mini/mac-mini.sh
 # Fallback:  https://gist.githubusercontent.com/ahdxb/7dc7377a171872ef677cedc8eff592bc/raw/mac-mini.sh
 # Source:    https://github.com/ahdxb/Sonar (private; published to Pages and Gist)
-# For a fresh, personally managed Mac mini. No Homebrew/Git prerequisite.
-# After creating the admin account: download this file, then run setup.
-# Setup installs dependencies and pauses for the manual steps below.
 #
 # USE
-#   bash mac-mini.sh                Show this guide; change nothing.
+#   bash mac-mini.sh | less         Show this guide (keys: Space, b, /, q)
 #   bash mac-mini.sh setup          Ask for a name and confirmation, then configure.
 #   bash mac-mini.sh setup-remote   Configure an already prepared Mini over SSH.
 #   sudo bash mac-mini.sh check     Read settings and test local service ports.
 #   sudo bash mac-mini.sh check --require-screen-sharing
-#                                  Also require Screen Sharing to accept TCP.
+#                                   Also require Screen Sharing to accept TCP.
 #
+# INSTRUCTIONS TO SET UP A NEW MAC MINI OUT OF THE BOX
+# ----------------------------------------------------
 # 1. UNBOX AND CREATE THE ADMINISTRATOR ACCOUNT (MANUAL)
-#   Connect power, Ethernet, a display, keyboard and mouse. Keep these available
-#   until the final reboot test. Start the Mac and follow Setup Assistant:
-#   - Choose your language, country and keyboard layout; connect to the Internet.
-#   - Set up as a new Mac; skip migration from another Mac or backup for this
-#     clean rebuild. Do not import the old Mini's Tailscale identity.
-#   - Create a local administrator with a strong, unique password. Record its
-#     SHORT account name and password in your password manager. Use the same
-#     short name on a replacement if you want saved SSH destinations to match.
-#   - Apple Account/iCloud sign-in is optional for these services. Choose Set Up
-#     Later for the minimum setup. Find My requires signing in if wanted later.
-#   - Skip optional Siri/Apple Intelligence, Screen Time and analytics choices
-#     as offered. They are not required. Leave other preferences at defaults.
-#   - If offered FileVault, leave it off for this unattended-boot design; verify
-#     its actual state in step 3 even if Setup Assistant never asked about it.
-#   Finish at the desktop, signed into the administrator account. Screens and
-#   wording vary by macOS version; none of the optional services above is needed.
+#   Connect power, Ethernet, a display, keyboard and mouse.
+#   Start the Mac and follow Setup Assistant.
+#   - Set up as a new Mac.
+#   - Create a local admin. Use the same admin _short_ name on a replacement
+#     for saved SSH destinations to match (optional).
+#   - Apple Account/iCloud sign-in, Siri/Apple AI, Screen Time are optional.
+#   - If offered FileVault, leave it off for an unattended-boot design.
 #
 # 2. DOWNLOAD THIS FILE AND START
-#   Open Terminal (Applications > Utilities, or Spotlight) and download the
-#   latest version from GitHub Pages (no GitHub sign-in needed):
+#   For an already prepared Mini, see "Terminal access over SSH" below.
 #
-#     curl -fsSLo ~/Downloads/mac-mini.sh \
-#       https://ahdxb.github.io/mini/mac-mini.sh
+#   Open Terminal, download this file, read this guide, and run the setup:
 #
-#   Read its contents before running it (e.g. less ~/Downloads/mac-mini.sh).
-#   No Git, GitHub CLI, personal access token or SSH deploy key is needed.
-#   Then run:
+#   | curl -fsSLo ~/Downloads/mac-mini.sh https://ahdxb.github.io/mini/mac-mini.sh
+#   | bash mac-mini.sh | less
+#   | /bin/bash ~/Downloads/mac-mini.sh setup
 #
-#     /bin/bash ~/Downloads/mac-mini.sh setup
-#
-#   Do NOT prefix this command with sudo. Setup asks for your administrator
-#   password only when needed. To read the whole guide without making changes:
-#
-#     /bin/bash ~/Downloads/mac-mini.sh
-#
+#   Do NOT prefix this command with sudo. Setup asks for the administrator
+#   password only when needed.
+#   ''' to check ->
 #   Setup checks that it is running locally on a Mini, asks for a name and your
 #   confirmation, and guides you through steps 3–7. If an update needs a reboot,
 #   or you need to stop, rerun the same command afterward. Completed installs are
 #   reused. Settings outside this script's scope are not reset on a rerun.
-#
-# TERMINAL ACCESS OVER SSH (AFTER INITIAL PREPARATION)
-#   First complete the administrator account and macOS preparation in steps 1/3,
-#   enable native Remote Login for that account in step 5, and install Homebrew
-#   and the Homebrew Tailscale system service in step 4. Enroll the Mini in the
-#   intended tailnet. Remote setup requires that service to be running and
-#   connected, Tailscale SSH off, incoming tailnet connections allowed, and
-#   FileVault fully off. It does not bootstrap or migrate Tailscale remotely.
-#   Screen Sharing is optional; no desktop login is needed for this workflow.
-#
-#   From your other computer's terminal, connected to the same tailnet:
-#
-#     ssh -t ACCOUNT@TAILSCALE_IP
-#
-#   Substitute the Mini's short account name and Tailscale IP. Verify its SSH
-#   host fingerprint against your independently recorded value on first use.
-#   A working MagicDNS name or reachable LAN IP can replace TAILSCALE_IP.
-#   In the resulting shell ON THE MINI, download and inspect the script:
-#
-#     curl -fsSLo ~/mac-mini.sh \
-#       https://ahdxb.github.io/mini/mac-mini.sh
-#     less ~/mac-mini.sh
-#     /bin/bash ~/mac-mini.sh setup-remote
-#
-#   Run setup-remote as the account user, without sudo. It requests sudo for
-#   privileged operations, validates prerequisites, displays the current
-#   identity, and asks you to type SETUP. It advertises exit-node service and
-#   applies the power settings. It preserves the name, tailnet, SSH permissions,
-#   DNS, subnet routes and other Tailscale preferences; it never restarts services,
-#   reauthenticates, upgrades software, opens GUI apps or requests a reboot.
-#   If a prerequisite fails, resolve it with local assistance before retrying.
-#
-#   Open the printed Tailscale admin URL on YOUR computer for step 6. Keep a
-#   second SSH connection open and verify a NEW connection after setup. Working
-#   access now cannot guarantee access after a network/power/OS failure.
-#   Each run prints a private progress-log path in your home folder. If the
-#   connection drops, reconnect and rerun the same command. It rechecks actual
-#   settings and skips completed changes; it does not roll back completed work.
-#   Do not run multiple setup sessions or edit Tailscale settings concurrently.
-#
-#   To check without changing configuration (also works over SSH):
-#
-#     sudo /bin/bash ~/mac-mini.sh check
-#
-#   Port 22 is required. Port 5900 is informational unless you explicitly run:
-#
-#     sudo /bin/bash ~/mac-mini.sh check --require-screen-sharing
+#   '''
 #
 # 3. PREPARE MACOS (SETUP PRINTS THIS CHECKLIST AND PAUSES)
 #   Open System Settings. Use its search box if a setting has moved:
@@ -215,6 +153,53 @@
 #     "restart after power failure". Record which recovery case you tested.
 #   The Mini is ready only when those tests pass. Repeat steps 1–7 for the other
 #   Mini with its own unique name. Keep account recovery and this file elsewhere.
+#
+# TERMINAL ACCESS OVER SSH (AFTER INITIAL PREPARATION)
+#   First complete the administrator account and macOS preparation in steps 1/3,
+#   enable native Remote Login for that account in step 5, and install Homebrew
+#   and the Homebrew Tailscale system service in step 4. Enroll the Mini in the
+#   intended tailnet. Remote setup requires that service to be running and
+#   connected, Tailscale SSH off, incoming tailnet connections allowed, and
+#   FileVault fully off. It does not bootstrap or migrate Tailscale remotely.
+#   Screen Sharing is optional; no desktop login is needed for this workflow.
+#
+#   From your other computer's terminal, connected to the same tailnet:
+#
+#     ssh -t ACCOUNT@TAILSCALE_IP
+#
+#   Substitute the Mini's short account name and Tailscale IP. Verify its SSH
+#   host fingerprint against your independently recorded value on first use.
+#   A working MagicDNS name or reachable LAN IP can replace TAILSCALE_IP.
+#   In the resulting shell ON THE MINI, download and inspect the script:
+#
+#     curl -fsSLo ~/mac-mini.sh \
+#       https://ahdxb.github.io/mini/mac-mini.sh
+#     less ~/mac-mini.sh
+#     /bin/bash ~/mac-mini.sh setup-remote
+#
+#   Run setup-remote as the account user, without sudo. It requests sudo for
+#   privileged operations, validates prerequisites, displays the current
+#   identity, and asks you to type SETUP. It advertises exit-node service and
+#   applies the power settings. It preserves the name, tailnet, SSH permissions,
+#   DNS, subnet routes and other Tailscale preferences; it never restarts services,
+#   reauthenticates, upgrades software, opens GUI apps or requests a reboot.
+#   If a prerequisite fails, resolve it with local assistance before retrying.
+#
+#   Open the printed Tailscale admin URL on YOUR computer for step 6. Keep a
+#   second SSH connection open and verify a NEW connection after setup. Working
+#   access now cannot guarantee access after a network/power/OS failure.
+#   Each run prints a private progress-log path in your home folder. If the
+#   connection drops, reconnect and rerun the same command. It rechecks actual
+#   settings and skips completed changes; it does not roll back completed work.
+#   Do not run multiple setup sessions or edit Tailscale settings concurrently.
+#
+#   To check without changing configuration (also works over SSH):
+#
+#     sudo /bin/bash ~/mac-mini.sh check
+#
+#   Port 22 is required. Port 5900 is informational unless you explicitly run:
+#
+#     sudo /bin/bash ~/mac-mini.sh check --require-screen-sharing
 #
 # REPLACEMENT DETAILS
 #   Keep this script, account/MFA recovery, and your client SSH keys available
@@ -335,13 +320,13 @@ elif [ -x /usr/local/bin/brew ]; then BREW=/usr/local/bin/brew; fi
 # Print a numbered step from the guide
 # ------------------------------------
 # awk starts at the requested heading and stops at the next one, or at the
-# replacement notes after step 7. It removes comment markers before printing.
+# SSH reference after step 7. It removes comment markers before printing.
 # Inside awk, $0 means the input line; outside awk, "$0" is this script's path.
 show_step() {
   awk -v n="$1" '
     $0 ~ "^# " n "\\. " { show=1; found=1 }
     show && /^# [0-9]+\. / && $0 !~ "^# " n "\\. " { exit }
-    show && /^# REPLACEMENT DETAILS/ { exit }
+    show && /^# (TERMINAL ACCESS OVER SSH|REPLACEMENT DETAILS)/ { exit }
     show { sub(/^# ?/, ""); print }
     END { if (!found) exit 1 }
   ' "$0" || die "cannot display guide step $1"
