@@ -187,6 +187,8 @@
 #
 #   Add --require-screen-sharing only if you require that service. Port 22 is
 #   required for both profiles; port 5900 is informational by default.
+#   PASS is green and FAIL red in color-capable terminals, including over SSH.
+#   Files and pipes receive plain text. Use NO_COLOR=1 to disable color.
 #   Server checks require FileVault fully off, sleep=0, power recovery=1 and
 #   Tailscale SSH off. Home reports FileVault and unselected power settings as
 #   information; it checks only explicitly selected power requirements. Home
@@ -562,8 +564,15 @@ if [ "$MODE" = check ]; then
   # FAIL and UNKNOWN print a label and increment their corresponding counters.
   BAD=0
   UNKNOWN=0
-  pass() { printf 'PASS     %s\n' "$*"; }
-  fail() { printf 'FAIL     %s\n' "$*"; BAD=$((BAD+1)); }
+  # Color labels only on a terminal; keep redirected output free of escape codes.
+  PASS_COLOR='' FAIL_COLOR='' COLOR_RESET=''
+  if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR:-}" ]; then
+    PASS_COLOR=$'\033[32m'
+    FAIL_COLOR=$'\033[31m'
+    COLOR_RESET=$'\033[0m'
+  fi
+  pass() { printf '%sPASS%s     %s\n' "$PASS_COLOR" "$COLOR_RESET" "$*"; }
+  fail() { printf '%sFAIL%s     %s\n' "$FAIL_COLOR" "$COLOR_RESET" "$*"; BAD=$((BAD+1)); }
   unknown() { printf 'UNKNOWN  %s\n' "$*"; UNKNOWN=$((UNKNOWN+1)); }
 
   # Compare a field with its expected value
