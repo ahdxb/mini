@@ -1,267 +1,253 @@
 #!/bin/bash
 # START GUIDE
-# Always-on Mac mini with Tailscale exit node: setup, check, and replacement notes.
+# Mac mini with Tailscale exit node: server and home setup, checks, and recovery.
 # Last updated 2026-10-19.
 # Download:  https://ahdxb.github.io/mini/mac-mini.sh
 # Fallback:  https://gist.githubusercontent.com/ahdxb/7dc7377a171872ef677cedc8eff592bc/raw/mac-mini.sh
 # Source:    https://github.com/ahdxb/Sonar (private; published to Pages and Gist)
 #
 # USE
-#   bash mac-mini.sh | less         Show this guide (keys: Space, b, /, q)
-#   bash mac-mini.sh setup          Ask for a name and confirmation, then configure.
-#   bash mac-mini.sh setup-remote   Configure an already prepared Mini over SSH.
-#   sudo bash mac-mini.sh check     Read settings and test local service ports.
-#   sudo bash mac-mini.sh check --require-screen-sharing
-#                                   Also require Screen Sharing to accept TCP.
+#   bash mac-mini.sh | less                 Read this guide (Space, b, /, q).
+#   bash mac-mini.sh setup --profile home   Local setup; preserve home settings.
+#   bash mac-mini.sh setup --profile server Local setup for an unattended server.
+#   bash mac-mini.sh setup-remote --profile home
+#   bash mac-mini.sh setup-remote --profile server
+#                                          Configure an already prepared Mini over SSH.
+#   sudo bash mac-mini.sh check --profile home
+#   sudo bash mac-mini.sh check --profile server
 #
-# INSTRUCTIONS TO SET UP A NEW MAC MINI OUT OF THE BOX
-# ----------------------------------------------------
-# 1. UNBOX AND CREATE THE ADMINISTRATOR ACCOUNT (MANUAL)
-#   Connect power, Ethernet, a display, keyboard and mouse.
-#   Start the Mac and follow Setup Assistant.
-#   - Set up as a new Mac.
-#   - Create a local admin. Use the same admin _short_ name on a replacement
-#     for saved SSH destinations to match (optional).
-#   - Apple Account/iCloud sign-in, Siri/Apple AI, Screen Time are optional.
-#   - If offered FileVault, leave it off for an unattended-boot design.
+#   Without --profile, all modes default to home. Profiles are not saved; specify
+#   the same profile and options on later checks/reruns. Changing to home does
+#   not undo previous server changes. Help and check make no configuration changes.
+#   Options for setup, setup-remote and check:
+#     --always-on                   Set/require computer sleep=0 (display may sleep).
+#     --restart-after-power-failure Set/require power-failure restart=1.
+#   Server includes both power options. Home preserves them unless requested.
+#   Check also accepts --require-screen-sharing. Screen Sharing is optional otherwise.
+#   Local setup alone accepts --hostname NAME to explicitly change the Tailscale
+#   name. Without it, the existing name is kept. SSH setup never renames the Mini.
 #
-# 2. DOWNLOAD THIS FILE AND START
-#   For an already prepared Mini, see "Terminal access over SSH" below.
+# 1. CHOOSE THE PROFILE AND CREATE THE ACCOUNT
+#   For a new Mini, connect Ethernet, display, keyboard and mouse and complete
+#   Setup Assistant. Create a local administrator and store account recovery
+#   independently of this Mini. Do not import another Mini's Tailscale identity.
+#   For an existing Mini, keep its accounts and data; no clean rebuild is required.
+#   - server: dedicated unattended Mini, such as France. Requires FileVault OFF
+#     for this cold-boot design, prevents computer sleep and enables power recovery.
+#   - home: a Mini also used for everyday work. Preserves FileVault, accounts,
+#     Computer Name, sleep and power recovery settings. A display does not decide
+#     the profile: a home Mini may also run continuously using --always-on.
+#   Both profiles install/configure the same Homebrew Tailscale system daemon and
+#   advertise exit-node service. Home preserves existing Tailscale SSH and other
+#   access preferences. Local server setup explicitly selects native SSH and
+#   allows incoming tailnet connections. Remote setup never changes access settings.
+#   Neither profile changes FileVault, account permissions, login settings,
+#   Screen Sharing or the firewall automatically. These remain manual choices.
 #
-#   Open Terminal, download this file, read this guide, and run the setup:
+# 2. PREPARE MACOS COMPLETELY BEFORE RUNNING SETUP (MANUAL)
+#   Complete these tasks first, including any restarts. For an already prepared
+#   Mini, verify what applies; use the SSH workflow below for remote maintenance.
+#   For both profiles:
+#   - Install current stable macOS updates, restart, and finish any prompts.
+#     On a deployed remote Mini, schedule updates separately with a recovery plan.
+#   - Verify networking and automatic date/time. Ethernet is recommended; DHCP
+#     is sufficient. Keep router inbound protection; do not forward ports 22/5900.
+#   - Keep or choose a Computer Name. This is separate from --hostname, which
+#     changes only the Tailscale name.
+#   - Enable native Remote Login for the intended account in System Settings >
+#     General > Sharing. Choose permitted users. Full-disk access is unnecessary
+#     merely to connect. The script checks port 22 but never edits SSH permissions.
+#   - Screen Sharing is optional. Enable it only if wanted, restrict permitted
+#     users, and use normal Mac-account authentication. Leave the legacy VNC
+#     password off. Remote Management must be off to enable Screen Sharing.
+#   - If a firewall is enabled, permit the services you intend to use. Do not
+#     enable "Block all incoming connections" for these remote services.
+#   Server only:
+#   - FileVault OFF; verify it is fully off before setup. This reduces protection
+#     against physical access to data. Keep sensitive personal data off this server.
+#   - Turn automatic login and Guest User off. Require a password immediately
+#     after screen lock. Let the display sleep; setup prevents computer sleep.
+#   - If Energy offers "Start up when power is connected" > "Always", choose it
+#     if desired. Setup also enables restart after power failure.
+#   Home:
+#   - Keep your existing FileVault, account, login, lock-screen and power choices.
+#     FileVault ON is valid and is not a failed home check. An unattended cold
+#     boot may require someone to unlock the disk before remote services return.
+#   - An exit node is unavailable while the computer sleeps. Choose --always-on
+#     only if continuous availability is wanted. Power recovery is a separate
+#     opt-in: --restart-after-power-failure. Neither option changes FileVault.
+#   Finish macOS preparation before downloading and launching setup below.
 #
-#   | curl -fsSLo ~/Downloads/mac-mini.sh https://ahdxb.github.io/mini/mac-mini.sh
-#   | bash mac-mini.sh | less
-#   | /bin/bash ~/Downloads/mac-mini.sh setup
+# 3. DOWNLOAD AND READ THE SCRIPT
+#   Open Terminal on the Mini (or see "Terminal access over SSH" below):
 #
-#   Do NOT prefix this command with sudo. Setup asks for the administrator
-#   password only when needed.
-#   ''' to check ->
-#   Setup checks that it is running locally on a Mini, asks for a name and your
-#   confirmation, and guides you through steps 3–7. If an update needs a reboot,
-#   or you need to stop, rerun the same command afterward. Completed installs are
-#   reused. Settings outside this script's scope are not reset on a rerun.
-#   '''
+#     curl -fsSLo ~/mac-mini.sh https://ahdxb.github.io/mini/mac-mini.sh
+#     bash ~/mac-mini.sh | less
 #
-# 3. PREPARE MACOS (SETUP PRINTS THIS CHECKLIST AND PAUSES)
-#   Open System Settings. Use its search box if a setting has moved:
-#   - General > Software Update: install current stable updates and restart now.
-#     Finish any prompts and log back in before proceeding.
-#   - General > Date & Time: set time automatically; confirm time/time zone.
-#   - General > About > Name: choose a useful computer name, e.g. "Le Mac mini".
-#     This is separate from the Tailscale network name requested in step 4.
-#   - Privacy & Security > FileVault: OFF; wait for any decryption to finish.
-#     This permits unattended cold boots but reduces protection against physical
-#     access to stored data. Do not keep sensitive personal data on this server.
-#   - Users & Groups: automatic login OFF and Guest User OFF. One administrator
-#     is enough for this minimal setup; additional accounts are optional.
-#   - Lock Screen: require a password immediately after sleep/screensaver.
-#     Let the DISPLAY sleep. Step 4 disables sleep of the COMPUTER itself.
-#   - Energy: if "Start up when power is connected" offers "Always", select it
-#     for stronger power recovery. Otherwise use restart after power failure,
-#     which step 4 also enables. See the Apple power reference below.
-#   Keep Ethernet connected. DHCP is sufficient; a static LAN IP is not required.
-#   Do not forward SSH/VNC ports on the router. Keep its inbound firewall enabled.
+#   Read the script itself with "less ~/mac-mini.sh" before running setup.
+#   No Git, GitHub CLI or access token is needed. Keep a downloaded recovery copy.
 #
-# 4. DEPENDENCIES AND CORE SETUP (AUTOMATED, WITH INSTALLER PROMPTS)
-#   Enter a unique Tailscale name: "le-mac-mini" for France, a different name
-#   for the second Mini. After you type SETUP, follow the prompts in Terminal.
-#   Setup first prints step 3 and waits for you to finish those macOS settings.
+# 4. RUN LOCAL SETUP AFTER PREPARATION
+#   Choose the intended command; do not prefix setup with sudo:
 #
-#   If Homebrew is absent, setup downloads and runs its official installer from
-#   https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh .
-#   It runs as your admin account; the installer requests sudo when needed and
-#   handles Command Line Tools installation. Complete any installer prompts.
-#   If tool installation fails, run "xcode-select --install", finish its dialog,
-#   then rerun setup. The full Xcode app is unnecessary. See https://brew.sh/ .
-#   This script uses full tool paths; no shell/PATH customization is required.
-#   Do NOT separately install the Tailscale App Store app or Homebrew cask.
+#     bash ~/mac-mini.sh setup --profile server --hostname le-mac-mini
+#     bash ~/mac-mini.sh setup --profile home
 #
-#   When Tailscale displays a login URL, open it in Safari and sign in to the
-#   SAME tailnet as your other devices. Complete device approval/Tailnet Lock
-#   signing if your tailnet asks. If the command waits, finish that approval.
+#   Optional home power changes, chosen explicitly:
 #
-#   Setup installs Tailscale if missing, registers its ROOT boot service,
-#   connects it, sets its Tailscale name, advertises an exit node, turns Tailscale
-#   SSH off, permits incoming tailnet connections, disables computer sleep and
-#   enables restart after power failure. It does not reboot or configure Sharing.
-#   It displays Tailscale status and the IP. Verify the intended account/tailnet.
-#   Record the name/IP and local account short name in your password manager.
-#   "whoami" in Terminal shows the current account's short name.
+#     bash ~/mac-mini.sh setup --profile home --always-on --restart-after-power-failure
 #
-# 5. ENABLE SSH AND OPTIONAL SCREEN SHARING (LOCAL SETUP PAUSES FOR YOU)
-#   In System Settings > General > Sharing:
-#   - Remote Login ON. Open its details, choose "Only these users", and add the
-#     intended local account. Full-disk access is not required merely to connect;
-#     enable it only if later maintenance tasks need it.
-#   - Optional: Screen Sharing ON if you want remote desktop access. Otherwise
-#     leave it off. Choose "Only these users" and add the intended account.
-#     Turn Remote Management OFF first if it is enabled. Use normal Mac-account
-#     authentication; leave the separate legacy "VNC password" option off.
-#   - If macOS asks about incoming connections for these services, allow them.
-#     If its firewall is enabled, do not use "Block all incoming connections"
-#     for a machine intended to accept these remote connections.
-#   This baseline uses the account password for native SSH and screen sharing.
-#   SSH keys can be added later; the script does not install keys or enforce them.
+#   Use a unique --hostname for each Mini if renaming. Setup verifies prerequisites,
+#   shows the selected profile and changes, and asks you to type SETUP. It does
+#   not open a macOS-settings checklist halfway through installation. Account,
+#   FileVault and Sharing choices must already be complete in step 2.
+#   If Homebrew is missing, local setup runs its official installer from:
+#     https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
+#   The installer may request sudo and install Command Line Tools. Full Xcode is
+#   unnecessary. If installation fails, resolve the installer error and rerun.
+#   Homebrew runs as your account, not root. Existing formulae are not upgraded.
+#   Do not install a second Tailscale app/cask. If one already exists, setup stops
+#   without replacing it; resolve installation choice locally first.
+#   Setup reuses a healthy running system daemon. If necessary locally, it starts
+#   the Homebrew service and runs "tailscale up" to connect/enroll. Open its login
+#   URL in a browser and select the intended tailnet. Complete device approval or
+#   Tailnet Lock signing if required. Already connected Minis are not reauthenticated.
+#   Setup advertises exit-node service, applies only the selected profile/options,
+#   and preserves other preferences. It does not reboot or change accounts.
+#   If existing home preferences block incoming tailnet connections, review them
+#   separately: setup preserves them, and the checker reports the access problem.
+#   Record the Tailscale IP/name and account short name ("whoami").
+#   On interruption, rerun the same command with the same profile/options.
+#   Completed installs and settings are reused. Changes are not rolled back.
 #
-# 6. APPROVE THE EXIT NODE (SETUP PAUSES FOR YOU)
-#   Open https://login.tailscale.com/admin/machines and find the correct Mini.
-#   Complete device approval if required. In its route settings, enable/approve
-#   "Use as exit node". In its device menu, disable NODE key expiry for this
-#   persistent server. Enrollment auth-key expiry is a different setting.
-#   If your tailnet has custom access rules, permit the intended clients to
-#   access this Mini's TCP 22 (also 5900 if using Screen Sharing) and use exit
-#   nodes (autogroup:internet).
-#   Do not replace an existing policy wholesale to make this work.
-#   Advertising, approval and client selection are THREE separate steps.
+# 5. APPROVE THE EXIT NODE (SETUP PRINTS THIS CHECKLIST AND PAUSES)
+#   Open https://login.tailscale.com/admin/machines on your own computer and find
+#   the Mini. Verify the intended tailnet/identity before changing approvals.
+#   Complete device approval, enable "Use as exit node" in route settings, and
+#   consider disabling NODE key expiry for a persistent server. Enrollment
+#   auth-key expiry is a different setting. Respect your existing access policy.
+#   If using custom access rules, permit the intended clients to access TCP 22
+#   (also 5900 if using Screen Sharing) and use exit nodes (autogroup:internet).
+#   Advertising, approval and client selection are three separate steps.
+#   After completing this step, type DONE for setup to run local checks.
 #
-# 7. TEST FROM ANOTHER DEVICE, THEN TEST UNATTENDED REBOOT
-#   Setup runs the local checker after step 6. To run it again later:
+# 6. RUN CHECKS FOR THE SAME PROFILE AND OPTIONS
+#   Setup passes its profile/power options to the checker automatically.
+#   To run it again locally or through SSH:
 #
-#     sudo /bin/bash ~/Downloads/mac-mini.sh check
+#     sudo bash ~/mac-mini.sh check --profile server
+#     sudo bash ~/mac-mini.sh check --profile home
+#     sudo bash ~/mac-mini.sh check --profile home --always-on --restart-after-power-failure
 #
-#   Resolve FAIL and UNKNOWN messages. Exit 0 means the automated local checks
-#   passed, 1 means a failure, and 2 means an incomplete/unsupported check.
-#   Exit-node approval is checked as reported by the local Tailscale daemon.
-#   This is not a fresh admin-console query; client permissions and working
-#   exit-node traffic still need the tests below.
-#   If the Tailscale app is installed, the checker reports that it differs from
-#   the intended Homebrew daemon setup. It does not launch, replace or remove it.
-#   This does not replace the following end-to-end tests:
-#   - On your laptop/phone, install or open its normal Tailscale client and sign
-#     into the same tailnet. Use another Internet connection, e.g. a hotspot.
-#   - SSH: on a client with SSH, run "ssh ACCOUNT@TAILSCALE_IP", substituting the
-#     Mini's short account name and its address from step 4. Verify the server's
-#     fingerprint before accepting it, then enter the Mini account's password.
-#     To view that fingerprint LOCALLY on the Mini after Remote Login is enabled:
+#   Add --require-screen-sharing only if you require that service. Port 22 is
+#   required for both profiles; port 5900 is informational by default.
+#   Server checks require FileVault fully off, sleep=0, power recovery=1 and
+#   Tailscale SSH off. Home reports FileVault and unselected power settings as
+#   information; it checks only explicitly selected power requirements. Home
+#   also reports the existing Tailscale SSH choice without requiring it off.
+#   Both profiles check Tailscale connectivity, exit-node advertisement/approval,
+#   incoming tailnet connections and the Homebrew system service.
+#   Exit 0 means local checks passed, 1 means a failure, and 2 means incomplete
+#   or unsupported checks. FileVault ON or ordinary sleep is not a home failure
+#   unless you explicitly require always-on power settings that are not met.
+#   The checker recognizes competing Tailscale installations without launching,
+#   replacing or removing them. This file supports the Homebrew daemon only.
+#   Local ports do not prove authentication. Exit-node approval is the daemon's
+#   report, not a fresh admin-console query. Complete the external tests below.
+#
+# 7. TEST REMOTE ACCESS, EXIT ROUTING AND RECOVERY
+#   From another device on the same tailnet, preferably on a different Internet
+#   connection (such as a hotspot):
+#   - Run "ssh ACCOUNT@TAILSCALE_IP" using the Mini's short account name. Verify
+#     the host fingerprint against an independently recorded value. Locally:
 #       sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-#   - If enabled, test Screen Sharing: Finder > Go > Connect to Server, enter
-#     "vnc://TAILSCALE_IP", and authenticate with the Mini's account. In Screens,
-#     create a Mac connection with that same address and account credentials.
-#     A working MagicDNS name may replace the IP in either client.
-#   - In the client's Tailscale menu, select THIS Mini as the exit node. Browse
-#     HTTPS websites and confirm DNS works. Check the public IP using an IP-check
-#     site; it should be the Mini site's Internet egress, not the client's.
-#     Restore the client's preferred exit-node selection after the test.
-#   - Restart the Mini with local help still available. Leave it at the login
-#     window: do NOT log in locally. Repeat SSH, optional screen sharing and exit-node
-#     browsing from your other device. If they fail, fix this before deployment.
-#   - If it will run without a display, disconnect the display and repeat the
-#     remote tests in that actual configuration before leaving the site.
-#   - Test power recovery during a planned local maintenance window. Never pull
-#     power during an update or active writes. A normal shutdown does not test
-#     "restart after power failure". Record which recovery case you tested.
-#   The Mini is ready only when those tests pass. Repeat steps 1–7 for the other
-#   Mini with its own unique name. Keep account recovery and this file elsewhere.
+#   - If Screen Sharing is enabled, test "vnc://TAILSCALE_IP" using the Mini's
+#     account credentials. A working MagicDNS name can replace the Tailscale IP.
+#   - Select this Mini as your client's exit node. Test HTTPS browsing, DNS and
+#     public egress IP. Restore the client's preferred exit-node selection afterward.
+#   - Server: restart with local assistance still available, leave at the login
+#     window without desktop login, and repeat the remote tests. Disconnect the
+#     display and repeat in the actual headless configuration before deployment.
+#   - Home: test the recovery behavior you chose. With FileVault on, arrange a
+#     disk unlock after cold boot; do not expect unattended remote recovery.
+#     If sleep is allowed, verify and accept that services are unavailable asleep.
+#   - Test chosen power-recovery behavior in a planned local maintenance window.
+#     Never pull power during updates or writes. Normal shutdown does not test
+#     restart after power failure. Record the recovery case actually tested.
+#   Do not rely on either Mini remotely until its intended operating tests pass.
 #
 # TERMINAL ACCESS OVER SSH (AFTER INITIAL PREPARATION)
-#   First complete the administrator account and macOS preparation in steps 1/3,
-#   enable native Remote Login for that account in step 5, and install Homebrew
-#   and the Homebrew Tailscale system service in step 4. Enroll the Mini in the
-#   intended tailnet. Remote setup requires that service to be running and
-#   connected, Tailscale SSH off, incoming tailnet connections allowed, and
-#   FileVault fully off. It does not bootstrap or migrate Tailscale remotely.
-#   Screen Sharing is optional; no desktop login is needed for this workflow.
-#
-#   From your other computer's terminal, connected to the same tailnet:
+#   Remote setup works with either profile. The account, native Remote Login,
+#   Homebrew formula and connected Homebrew Tailscale ROOT boot service must
+#   already exist. Server additionally requires FileVault fully off and Tailscale
+#   SSH off. Home preserves both choices. Both require incoming tailnet connections
+#   already allowed. Remote setup does not bootstrap, migrate or restart Tailscale.
+#   A logged-in desktop is unnecessary once macOS and its disk are accessible.
+#   From your other computer (connected to the same tailnet):
 #
 #     ssh -t ACCOUNT@TAILSCALE_IP
 #
-#   Substitute the Mini's short account name and Tailscale IP. Verify its SSH
-#   host fingerprint against your independently recorded value on first use.
-#   A working MagicDNS name or reachable LAN IP can replace TAILSCALE_IP.
-#   In the resulting shell ON THE MINI, download and inspect the script:
+#   Verify the SSH fingerprint. A reachable LAN IP or working MagicDNS name can
+#   replace TAILSCALE_IP. In the resulting terminal ON THE MINI:
 #
-#     curl -fsSLo ~/mac-mini.sh \
-#       https://ahdxb.github.io/mini/mac-mini.sh
+#     curl -fsSLo ~/mac-mini.sh https://ahdxb.github.io/mini/mac-mini.sh
 #     less ~/mac-mini.sh
-#     /bin/bash ~/mac-mini.sh setup-remote
+#     bash ~/mac-mini.sh setup-remote --profile server
 #
-#   Run setup-remote as the account user, without sudo. It requests sudo for
-#   privileged operations, validates prerequisites, displays the current
-#   identity, and asks you to type SETUP. It advertises exit-node service and
-#   applies the power settings. It preserves the name, tailnet, SSH permissions,
-#   DNS, subnet routes and other Tailscale preferences; it never restarts services,
-#   reauthenticates, upgrades software, opens GUI apps or requests a reboot.
-#   If a prerequisite fails, resolve it with local assistance before retrying.
-#
-#   Open the printed Tailscale admin URL on YOUR computer for step 6. Keep a
-#   second SSH connection open and verify a NEW connection after setup. Working
-#   access now cannot guarantee access after a network/power/OS failure.
-#   Each run prints a private progress-log path in your home folder. If the
-#   connection drops, reconnect and rerun the same command. It rechecks actual
-#   settings and skips completed changes; it does not roll back completed work.
-#   Do not run multiple setup sessions or edit Tailscale settings concurrently.
-#
-#   To check without changing configuration (also works over SSH):
-#
-#     sudo /bin/bash ~/mac-mini.sh check
-#
-#   Port 22 is required. Port 5900 is informational unless you explicitly run:
-#
-#     sudo /bin/bash ~/mac-mini.sh check --require-screen-sharing
+#   For the home Mini, use "setup-remote --profile home" instead; add either home
+#   power option only if wanted. Do not prefix setup-remote with sudo. It verifies
+#   prerequisites, shows the identity/profile and asks for SETUP. It preserves
+#   name, tailnet, SSH/DNS/routing/access preferences and running services, changing
+#   only exit-node advertisement and selected power settings. It never opens GUI
+#   apps, upgrades software, reauthenticates, restarts services or reboots.
+#   Keep a second SSH session open, then verify a NEW connection afterward.
+#   Open printed approval URLs on your own computer. Each run prints a private
+#   progress log in your home folder. On a dropped connection, reconnect and
+#   rerun the same command/options; it rechecks live state and skips completed work.
+#   Do not run concurrent setup sessions or change Tailscale settings during setup.
+#   Working access now cannot guarantee access after network/power/OS failure.
 #
 # REPLACEMENT DETAILS
-#   Keep this script, account/MFA recovery, and your client SSH keys available
-#   independently of the Minis. Enroll a replacement as a NEW Tailscale device;
-#   never copy the old Tailscale state. Retire the confirmed failed device in
-#   the admin console, reuse its name, and repeat approvals and expiry settings.
-#   Its Tailscale IP and SSH host keys may change. Verify the new SSH fingerprint
-#   locally before replacing its old known_hosts entry. Reselect the replacement
-#   exit node on clients and update saved Screens/SSH destinations as necessary.
+#   Keep this script and account/MFA recovery independently of both Minis. Use
+#   the same profile/options on a replacement and enroll it as a NEW Tailscale
+#   device; never copy old Tailscale state. Retire the confirmed failed device,
+#   reuse its name if desired, and repeat approvals and expiry choices. IP and
+#   SSH host keys can change. Verify the new fingerprint independently before
+#   changing known_hosts. Update saved SSH/Screen Sharing/exit-node selections.
 #
-# UPDATES
-#   Update one Mini at a time. Keep the other working and local help available.
-#   For a deliberate Tailscale update on a new Apple-silicon Mini:
+# UPDATES AND LIMITS
+#   Update one Mini at a time with a recovery plan. On Apple Silicon:
 #     /opt/homebrew/bin/brew update
 #     /opt/homebrew/bin/brew upgrade tailscale
 #     sudo /opt/homebrew/bin/brew services restart tailscale
-#   Then check and repeat remote tests. Intel Homebrew uses /usr/local instead.
-#   After macOS updates, also test access after reboot without desktop login.
-#
-# LIMITS AND ALERTS
-#   The root service starts during boot and restarts if tailscaled exits.
-#   It needs macOS, an unlocked disk and working networking first.
-#   Power recovery covers power failure, not every shutdown, hang or failed OS
-#   update. Supported newer Minis also offer Energy > start when power connects
-#   > Always: https://support.apple.com/en-au/125517 . Set that in the UI if wanted.
-#   Ethernet, a UPS for the Mini/router, and local assistance improve recovery.
-#   Native SSH/Screen Sharing may also be reachable on the LAN. Do not forward
-#   ports 22/5900 from the Internet. Keep the router's inbound firewall enabled.
-#   This uses native macOS SSH, not Tailscale SSH. No custom SSH/firewall policy.
-#   Alerts are not installed by this script. If wanted later, the smallest
-#   addition is an external missed-heartbeat service, one check per Mini.
-#   A local checker cannot prove that remote login or exit routing works.
+#   Intel Homebrew uses /usr/local instead. Service restarts may interrupt access;
+#   do not perform these over your only connection without a recovery path.
+#   Recheck the same profile/options and repeat external tests after updates.
+#   The root daemon starts at boot, but needs macOS, disk access and networking.
+#   Power recovery does not cover every shutdown, hang or failed update. Ethernet,
+#   a UPS for the Mini/router and local assistance improve recovery. This script
+#   installs no alerts. A local checker cannot prove remote access or exit routing.
 #
 # KEEPING IT SHARED
-#   Keep this one file in the private GitHub repository as the master copy.
-#   Pushing it to main publishes the script to GitHub Pages through the public
-#   ahdxb/mini repository and updates the secret Gist automatically. The workflow
-#   also runs when its publishing configuration changes or when started manually.
-#   Only mac-mini.sh, the download index and .nojekyll are copied to mini; Sonar's
-#   private Git history and other files stay in Sonar. The script is PUBLIC at
-#   both download URLs, and mini is discoverable. Keep this file free of secrets.
+#   Sonar is the private master. Pushes to main publish only mac-mini.sh, the
+#   download index and .nojekyll to public ahdxb/mini, and update the secret Gist.
+#   Publishing also runs for workflow/template changes and manual dispatches.
+#   Private Git history stays in Sonar; this script is public at BOTH destinations.
 #   Pages: https://ahdxb.github.io/mini/mac-mini.sh
-#   Gist fallback (use if Pages is unavailable):
+#   Gist fallback:
 #     curl -fsSLo ~/mac-mini.sh \
 #       https://gist.githubusercontent.com/ahdxb/7dc7377a171872ef677cedc8eff592bc/raw/mac-mini.sh
-#   Both destinations serve the latest published copy; allow time for publishing.
-#   Pages publishing uses Sonar's MINI_DEPLOY_KEY secret, a dedicated write key
-#   for ahdxb/mini only. Gist publishing uses the existing GIST_TOKEN secret.
-#   Keep a downloaded copy on your laptop for recovery without GitHub access.
-#   Rerun the step 2 curl command for updates; setup does not update itself.
-#   No credentials belong in the file or repository. Keep GitHub/MFA recovery
-#   accessible independently of either Mini. A download is not automatic sync.
+#   Allow time for publishing. Pages uses Sonar's MINI_DEPLOY_KEY secret (write
+#   access to mini only); Gist uses GIST_TOKEN. Never put credentials in this file.
+#   Rerun the download command in step 3 for updates; setup does not update itself.
 #
 # REFERENCES
-#   https://docs.github.com/en/repositories/working-with-files/using-files/viewing-and-understanding-files
-#   https://support.apple.com/guide/mac-mini/welcome/mac
 #   https://docs.brew.sh/Installation
 #   https://github.com/tailscale/tailscale/wiki/Tailscaled-on-macOS
 #   https://tailscale.com/docs/concepts/macos-variants
 #   https://tailscale.com/docs/reference/tailscale-cli
 #   https://tailscale.com/docs/features/exit-nodes
-#   https://support.apple.com/en-gb/guide/mac-help/mh11848/mac
+#   https://support.apple.com/guide/mac-help/flvlt001/mac
 #   https://support.apple.com/en-gb/guide/mac-help/mchlp1066/mac
 #   https://support.apple.com/en-au/125517
 # END GUIDE
@@ -292,20 +278,38 @@ if [ "$MODE" = help ] || [ "$MODE" = --help ]; then
   exit 0
 fi
 
-# Validate the requested mode
-# ---------------------------
-# Accept setup, setup-remote, or check with its optional Screen Sharing flag.
-# || calls die() only when the preceding test fails.
+# Parse explicit profile/options. Default to home so bare commands do not
+# silently impose unattended-server requirements on an everyday Mac.
+case "$MODE" in setup|setup-remote|check) ;; *) die 'Choose help, setup, setup-remote, or check.' ;; esac
+shift
+PROFILE=home
+ALWAYS_ON=false
+POWER_RECOVERY=false
 REQUIRE_SCREEN_SHARING=false
-case "$MODE" in
-  check)
-    if [ $# = 2 ] && [ "$2" = --require-screen-sharing ]; then
-      REQUIRE_SCREEN_SHARING=true
-    else
-      [ $# = 1 ] || die 'Use: sudo bash mac-mini.sh check [--require-screen-sharing]'
-    fi ;;
-  setup|setup-remote) [ $# = 1 ] || die 'Setup modes do not accept extra arguments.' ;;
-  *) die 'Choose help, setup, setup-remote, or check.' ;;
+NAME=''
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --profile)
+      [ $# -ge 2 ] || die '--profile requires home or server.'
+      PROFILE=$2; shift 2 ;;
+    --always-on) ALWAYS_ON=true; shift ;;
+    --restart-after-power-failure) POWER_RECOVERY=true; shift ;;
+    --require-screen-sharing)
+      [ "$MODE" = check ] || die '--require-screen-sharing is a check option.'
+      REQUIRE_SCREEN_SHARING=true; shift ;;
+    --hostname)
+      [ "$MODE" = setup ] || die '--hostname is supported only in local setup; remote setup preserves the name.'
+      [ $# -ge 2 ] || die '--hostname requires a DNS name.'
+      NAME=$2
+      [[ "$NAME" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] && [ ${#NAME} -le 63 ] || die 'Use 1–63 lower-case letters, digits and internal hyphens.'
+      shift 2 ;;
+    *) die "Unknown option: $1" ;;
+  esac
+done
+case "$PROFILE" in
+  server) ALWAYS_ON=true; POWER_RECOVERY=true ;;
+  home) ;;
+  *) die '--profile must be home or server.' ;;
 esac
 [ "$(uname -s)" = Darwin ] || die 'This script is for macOS.'
 
@@ -369,6 +373,71 @@ check_tailscale_installation() {
   done
 }
 
+# Profile choices affect only these power requirements; unselected values are
+# never written. Used by local setup, SSH setup, and the read-only checker.
+power_selected() {
+  case "$1" in
+    sleep) [ "$ALWAYS_ON" = true ] ;;
+    autorestart) [ "$POWER_RECOVERY" = true ] ;;
+  esac
+}
+validate_selected_power() {
+  local key
+  for key in sleep autorestart; do
+    if power_selected "$key"; then
+      awk -v k="$key" '$1==k {n++; if ($2 !~ /^[0-9]+$/) bad=1} END {exit !(n && !bad)}' "$1" ||
+        die "Cannot verify selected power setting $key."
+    fi
+  done
+}
+setup_progress() { printf '%s\n' "$*"; }
+apply_power_settings() {
+  local setting key value
+  for setting in sleep:0 autorestart:1; do
+    key=${setting%:*}; value=${setting#*:}
+    if power_selected "$key"; then
+      if awk -v k="$key" -v v="$value" '$1==k {n++; if ($2!=v) bad=1} END {exit !(n && !bad)}' "$1"; then
+        setup_progress "Power setting $key=$value already applied; skipped."
+      else
+        setup_progress "Applying power setting $key=$value."
+        sudo -n pmset -a "$key" "$value"
+        setup_progress "Power setting $key=$value applied."
+      fi
+    fi
+  done
+}
+show_profile_plan() {
+  printf 'Profile: %s\n' "$PROFILE"
+  if [ "$PROFILE" = server ]; then
+    printf 'FileVault must already be OFF; accounts and security settings remain manual.\n'
+  else
+    printf 'Preserve FileVault, accounts, login, lock-screen and unselected power settings.\n'
+  fi
+  if [ "$ALWAYS_ON" = true ]; then
+    printf 'Selected: prevent computer sleep (sleep=0).\n'
+  else
+    printf 'Preserve computer sleep; exit-node availability follows its sleep schedule.\n'
+  fi
+  if [ "$POWER_RECOVERY" = true ]; then
+    printf 'Selected: enable restart after power failure (autorestart=1).\n'
+  else
+    printf 'Preserve restart-after-power-failure setting.\n'
+  fi
+}
+# Pass exactly the selected requirements to the child checker. Profiles are
+# explicit per invocation, so this does not depend on sudo preserving variables.
+finish_setup() {
+  local result=0
+  local check_args=(check --profile "$PROFILE")
+  if [ "$ALWAYS_ON" = true ]; then check_args+=(--always-on); fi
+  if [ "$POWER_RECOVERY" = true ]; then check_args+=(--restart-after-power-failure); fi
+  manual_step 5
+  sudo /bin/bash "$0" "${check_args[@]}" || result=$?
+  show_step 7
+  setup_progress "Local checks returned $result; complete the external tests for profile $PROFILE."
+  return "$result"
+}
+
 # CHECK: require access to system settings
 # ----------------------------------------
 # Enters check mode.
@@ -430,7 +499,7 @@ if [ "$MODE" = check ]; then
   # Keep stderr privately. On failure, append its first nonempty line (up to 240 characters);
   # with no detail, use the generic error message.
   # Signal exit codes alone are not treated as proof of a timeout.
-  printf 'Local checks, %s\n' "$(date '+%Y-%m-%d %H:%M %Z')"
+  printf 'Local checks, %s (profile: %s)\n' "$(date '+%Y-%m-%d %H:%M %Z')" "$PROFILE"
 
   # Check that Homebrew can start. Asking for its version does not install or update software.
   if "$BREW" --version >/dev/null 2>&1; then
@@ -477,8 +546,15 @@ if [ "$MODE" = check ]; then
                                     # Copy Tailscale's settings as JSON into a file
       expect "$TMP/prefs" advertise-exit-node true 'Exit node advertised'
                                     # PASS if this Mac is set to offer itself as an exit node
-      expect "$TMP/prefs" ssh false 'Native SSH baseline (Tailscale SSH off)'
-                                    # PASS if Tailscale's built-in SSH server is turned off
+      if [ "$PROFILE" = server ]; then
+        expect "$TMP/prefs" ssh false 'Server native SSH baseline (Tailscale SSH off)'
+      else
+        SSH_PREF=$(field "$TMP/prefs" ssh || true)
+        case "$SSH_PREF" in
+          true|false) printf 'INFO     Tailscale SSH=%s (home choice preserved)\n' "$SSH_PREF" ;;
+          *) unknown 'Cannot read Tailscale SSH preference' ;;
+        esac
+      fi
       expect "$TMP/prefs" shields-up false 'Incoming tailnet connections allowed'
                                     # PASS if this Mac accepts connections from other tailnet devices
     else
@@ -499,28 +575,33 @@ if [ "$MODE" = check ]; then
                                   # If the dump says "running", report PASS
   else fail 'Expected Homebrew Tailscale startup service is missing or stopped'; fi
 
-  # Check that automatic sleep is off and restart after power failure is on
-  # -----------------------------------------------------------------------
-  # Read the saved power settings without changing them. Expect sleep=0 and
-  # autorestart=1. Each setting must appear, and every reported value must match.
-  # Report FAIL if a setting is missing or has a different value.
+  # Check only power settings selected by the profile/options. Unselected home
+  # settings and FileVault are informational, including when they are unreadable.
   if pmset -g custom >"$TMP/power" 2>/dev/null; then
     for setting in sleep:0 autorestart:1; do
       key=${setting%:*}; value=${setting#*:}
-      if awk -v k="$key" -v v="$value" '$1==k {n++; if ($2!=v) bad=1} END {exit !(n && !bad)}' "$TMP/power"; then
-        pass "Power setting $key=$value"
-      else fail "Power setting $key should be $value"; fi
+      if power_selected "$key"; then
+        if awk -v k="$key" -v v="$value" '$1==k {n++; if ($2!=v) bad=1} END {exit !(n && !bad)}' "$TMP/power"; then
+          pass "Power setting $key=$value"
+        else fail "Selected power setting $key should be $value"; fi
+      else
+        VALUES=$(awk -v k="$key" '$1==k {print $2}' "$TMP/power")
+        printf 'INFO     Power setting %s=%s (home choice preserved)\n' "$key" "${VALUES:-unknown}"
+      fi
     done
-  else unknown 'Cannot read power settings'; fi
+  elif [ "$ALWAYS_ON" = true ] || [ "$POWER_RECOVERY" = true ]; then
+    unknown 'Cannot read selected power settings'
+  else printf 'INFO     Cannot read power settings (home choices preserved)\n'; fi
 
-  # Check FileVault without changing it
-  # -----------------------------------
-  # Require the exact fully-off status. Encryption/decryption still in progress
-  # must not be mistaken for a completed unattended-boot setup.
   if fdesetup status >"$TMP/filevault" 2>/dev/null; then
-    if grep -Fxq 'FileVault is Off.' "$TMP/filevault"; then pass 'FileVault off for unattended cold boot';
-    else fail 'FileVault is not fully off; unattended cold boot needs review'; fi
-  else unknown 'Cannot read FileVault status'; fi
+    if [ "$PROFILE" = server ]; then
+      if grep -Fxq 'FileVault is Off.' "$TMP/filevault"; then pass 'FileVault off for server unattended cold boot';
+      else fail 'Server profile requires FileVault fully off'; fi
+    else
+      printf 'INFO     %s (home choice preserved; unlock may be needed after cold boot)\n' "$(head -n 1 "$TMP/filevault")"
+    fi
+  elif [ "$PROFILE" = server ]; then unknown 'Cannot read FileVault status';
+  else printf 'INFO     Cannot read FileVault status (home choice preserved)\n'; fi
 
   # Native SSH is required. Screen Sharing is optional unless requested.
   # Local TCP probes do not test authentication or reachability from a client.
@@ -538,10 +619,10 @@ if [ "$MODE" = check ]; then
   # List the tests that still need a person or another device. Confirmed failures
   # return exit 1; otherwise unknown results return exit 2. With neither, explicitly
   # exit 0 after the success message. This means only the local checks passed.
-  printf '\nMANUAL: verify the displayed identity, node expiry, client permissions, automatic\n'
-  printf 'login off, permitted users, remote SSH, optional Screen Sharing, exit-node browsing and\n'
-  printf 'DNS, and access after reboot without a desktop login. Local TCP is not\n'
-  printf 'an authentication test. This script sends no alerts and makes no repairs.\n'
+  printf '\nMANUAL: verify identity, node expiry, client permissions, remote SSH, optional\n'
+  printf 'Screen Sharing, exit-node browsing and DNS. Follow step 7 for profile %s.\n' "$PROFILE"
+  printf 'Local TCP is not an authentication test. Home sleep/FileVault choices can\n'
+  printf 'limit availability and cold-boot recovery. No alerts or repairs are made.\n'
   printf '\nResult: %s failed; %s unknown.\n' "$BAD" "$UNKNOWN"
   [ "$BAD" = 0 ] || exit 1
   [ "$UNKNOWN" = 0 ] || exit 2
@@ -549,7 +630,7 @@ if [ "$MODE" = check ]; then
   exit 0
 fi
 
-# REMOTE SETUP: finish a prepared server without changing its access method.
+# REMOTE SETUP: finish a prepared Mini without changing its access method.
 # Require the existing Homebrew system daemon rather than installing, starting
 # or migrating networking software through the connection that depends on it.
 if [ "$MODE" = setup-remote ]; then
@@ -587,7 +668,7 @@ if [ "$MODE" = setup-remote ]; then
   trap 'exit 130' INT
   trap 'exit 143' TERM
   REMOTE_LOG=$(mktemp "$HOME/mac-mini-remote.XXXXXX")
-  remote_progress() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')" "$*" | tee -a "$REMOTE_LOG"; }
+  setup_progress() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')" "$*" | tee -a "$REMOTE_LOG"; }
   printf 'Private progress log: %s\n' "$REMOTE_LOG"
 
   remote_preflight() {
@@ -604,40 +685,45 @@ if [ "$MODE" = setup-remote ]; then
       [ -n "$(field "$TMP/status" "$value")" ] || die "Cannot verify Tailscale identity field $value."
     done
     run_timed sudo -n "$TS" get --json >"$TMP/prefs" || die 'Cannot read Tailscale preferences. No configuration was changed.'
-    # Refuse rather than disable Tailscale SSH: the current session may use it.
-    [ "$(field "$TMP/prefs" ssh)" = false ] ||
-      die 'Tailscale SSH is enabled or unknown. Establish native Remote Login and resolve this locally; remote setup will not change SSH settings.'
+    # Never disable Tailscale SSH through a session that may depend on it.
+    # Server requires native SSH already selected; home preserves either choice.
+    value=$(field "$TMP/prefs" ssh) || die 'Cannot verify Tailscale SSH preference.'
+    case "$value" in true|false) ;; *) die 'Unrecognized Tailscale SSH preference.' ;; esac
+    if [ "$PROFILE" = server ] && [ "$value" != false ]; then
+      die 'Server profile requires native SSH already selected. Resolve locally; remote setup will not disable Tailscale SSH.'
+    fi
     [ "$(field "$TMP/prefs" shields-up)" = false ] ||
       die 'Incoming tailnet connections must already be allowed. Remote setup will not change access settings.'
     value=$(field "$TMP/prefs" advertise-exit-node) || die 'Cannot read exit-node advertisement preference.'
     case "$value" in true|false) ;; *) die 'Unrecognized exit-node advertisement preference.' ;; esac
     nc -z -G 3 127.0.0.1 22 >/dev/null 2>&1 || die 'Native SSH must already listen on port 22. Resolve Remote Login locally.'
-    sudo -n fdesetup status >"$TMP/filevault" || die 'Cannot verify FileVault. Complete local preparation first.'
-    grep -Fxq 'FileVault is Off.' "$TMP/filevault" || die 'FileVault must be fully off for this unattended-boot design. Resolve locally first.'
-    pmset -g custom >"$TMP/power" || die 'Cannot read power settings.'
-    # Refuse unreadable/missing values rather than guessing what will change.
-    for value in sleep autorestart; do
-      awk -v k="$value" '$1==k {n++; if ($2 !~ /^[0-9]+$/) bad=1} END {exit !(n && !bad)}' "$TMP/power" ||
-        die "Cannot verify power setting $value."
-    done
+    if [ "$PROFILE" = server ]; then
+      sudo -n fdesetup status >"$TMP/filevault" || die 'Cannot verify FileVault. Complete local preparation first.'
+      grep -Fxq 'FileVault is Off.' "$TMP/filevault" || die 'Server profile requires FileVault fully off. Resolve locally first.'
+    fi
+    if [ "$ALWAYS_ON" = true ] || [ "$POWER_RECOVERY" = true ]; then
+      pmset -g custom >"$TMP/power" || die 'Cannot read selected power settings.'
+      validate_selected_power "$TMP/power"
+    fi
   }
 
   remote_preflight
-  remote_progress 'Preflight passed; no configuration changed.'
+  setup_progress 'Preflight passed; no configuration changed.'
   REMOTE_TAILNET=$(field "$TMP/status" CurrentTailnet.Name)
   REMOTE_NAME=$(field "$TMP/status" Self.DNSName)
   printf 'Existing identity: %s / %s\n' "$REMOTE_TAILNET" "$REMOTE_NAME"
+  show_profile_plan
   cat <<'REMOTE_PLAN'
-This will advertise this Mini as an exit node, disable computer sleep, and enable
-restart after power failure. Completed settings are skipped on reruns. It keeps
-the existing name, tailnet, SSH/DNS/routing/access preferences and running services.
-No installs, upgrades, GUI apps, service restarts or reboots are requested.
-Verify the identity above. Keep a second SSH session open. Afterward, open the
-printed admin URL on your own computer, then test a NEW SSH connection.
+This advertises this Mini as an exit node and applies only selected power settings.
+Completed settings are skipped on reruns. It preserves the existing name, tailnet,
+SSH/DNS/routing/access preferences and running services. No installs, upgrades,
+GUI apps, service restarts or reboots are requested. Verify the identity above.
+Keep a second SSH session open, then test a NEW connection afterward. Open the
+printed admin URL on your own computer.
 REMOTE_PLAN
   printf 'Type SETUP to apply these changes: '
   IFS= read -r CONFIRM
-  [ "$CONFIRM" = SETUP ] || { remote_progress 'Cancelled; no configuration changed.'; exit 0; }
+  [ "$CONFIRM" = SETUP ] || { setup_progress 'Cancelled; no configuration changed.'; exit 0; }
   # Refresh sudo and recheck live state after the user has reviewed the plan.
   sudo -v
   remote_preflight
@@ -645,147 +731,106 @@ REMOTE_PLAN
     [ "$(field "$TMP/status" Self.DNSName)" = "$REMOTE_NAME" ] ||
     die 'Tailscale identity changed while awaiting confirmation. Rerun and review the current identity.'
   if [ "$(field "$TMP/prefs" advertise-exit-node)" = true ]; then
-    remote_progress 'Exit-node advertisement already enabled; skipped.'
+    setup_progress 'Exit-node advertisement already enabled; skipped.'
   else
-    remote_progress 'Enabling exit-node advertisement.'
+    setup_progress 'Enabling exit-node advertisement.'
     sudo -n "$TS" set --advertise-exit-node=true
-    remote_progress 'Exit-node advertisement enabled.'
+    setup_progress 'Exit-node advertisement enabled.'
   fi
-  for setting in sleep:0 autorestart:1; do
-    key=${setting%:*}; value=${setting#*:}
-    if awk -v k="$key" -v v="$value" '$1==k {n++; if ($2!=v) bad=1} END {exit !(n && !bad)}' "$TMP/power"; then
-      remote_progress "Power setting $key=$value already applied; skipped."
-    else
-      remote_progress "Applying power setting $key=$value."
-      sudo -n pmset -a "$key" "$value"
-      remote_progress "Power setting $key=$value applied."
-    fi
-  done
-  remote_progress 'Configuration applied. Exit-node approval and external tests remain.'
-  # Show the existing admin checklist without opening a browser on the server.
-  manual_step 6
+  if [ "$ALWAYS_ON" = true ] || [ "$POWER_RECOVERY" = true ]; then
+    apply_power_settings "$TMP/power"
+  fi
+  setup_progress 'Configuration applied. Exit-node approval and external tests remain.'
   RESULT=0
-  sudo /bin/bash "$0" check || RESULT=$?
-  show_step 7
-  remote_progress "Local checks returned $RESULT; verify a new SSH connection and complete the external tests."
+  finish_setup || RESULT=$?
   exit "$RESULT"
 fi
 
-# SETUP: check the operating conditions
-# -------------------------------------
-# Stop on unhandled errors (set -e). Require an interactive Terminal, a normal
-# user account and Mac mini hardware. Reject sessions identified as SSH sessions.
-# The SSH guard cannot detect every remote-control tool; retain local access.
-# Privileged commands will request sudo individually, so Homebrew runs as the user.
+# LOCAL SETUP: macOS/account/Sharing preparation is complete before launch.
+# Home preserves existing preferences; server selects its documented baseline.
 if [ "$MODE" = setup ]; then
   set -e
-  [ -t 0 ] || die 'Run setup in an interactive Terminal window.'
-  [ "$(id -u)" != 0 ] || die 'Run setup as your local administrator, without sudo.'
-  [ -z "${SSH_CONNECTION:-}${SSH_TTY:-}" ] || die 'Use setup at the Mini, not through SSH.'
+  [ -t 0 ] || die 'Run setup in an interactive terminal.'
+  [ "$(id -u)" != 0 ] || die 'Run setup as your administrator account, without sudo.'
+  [ -z "${SSH_CONNECTION:-}${SSH_TTY:-}" ] || die 'Use setup-remote through SSH; local setup can start or enroll Tailscale.'
+  case " $(id -Gn) " in *' admin '*) ;; *) die 'Setup requires a local administrator account.' ;; esac
   system_profiler SPHardwareDataType | grep -q 'Model Name: Mac mini' || die 'Setup is restricted to Mac mini hardware.'
-
-  # Refuse common competing Tailscale installations
-  #
-  # Check the GUI app, standalone daemon and user LaunchAgent paths. Stop rather
-  # than replace them. These paths do not cover every possible custom installation.
   check_tailscale_installation
-
-  # Choose the Tailscale name
-  #
-  # Read a name without saving a separate profile. Require a DNS label of 1–63
-  # characters: lower-case letters/digits at each end, with internal hyphens allowed.
-  printf 'Unique name for this Mini (France: le-mac-mini): '
-  IFS= read -r NAME
-  [[ "$NAME" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] && [ ${#NAME} -le 63 ] || die 'Use 1–63 lower-case letters, digits and internal hyphens.'
-
-  # Show the changes and request confirmation
-  #
-  # The quoted PLAN delimiter prints the text literally, without shell expansion.
-  # Nothing is installed or configured unless the user enters SETUP.
+  sudo -v
+  umask 077
+  TMP=$(mktemp -d)
+  trap 'rm -rf "$TMP"' EXIT
+  nc -z -G 3 127.0.0.1 22 >/dev/null 2>&1 || die 'Complete step 2 first: native Remote Login must already listen on port 22.'
+  if [ "$PROFILE" = server ]; then
+    sudo -n fdesetup status >"$TMP/filevault" || die 'Cannot verify FileVault. Complete macOS preparation first.'
+    grep -Fxq 'FileVault is Off.' "$TMP/filevault" || die 'Server profile requires FileVault fully off. Complete step 2 first.'
+  fi
+  if [ "$ALWAYS_ON" = true ] || [ "$POWER_RECOVERY" = true ]; then
+    pmset -g custom >"$TMP/power" || die 'Cannot read selected power settings.'
+    validate_selected_power "$TMP/power"
+  fi
+  show_profile_plan
   cat <<'PLAN'
-This will install Homebrew and its required tools if missing, using the official
-interactive installer, then install the Tailscale formula and start it at boot,
-connect it to your tailnet, set its Tailscale name, advertise an exit node,
-disable Tailscale SSH, prevent system sleep, and enable power-failure restart.
-It leaves macOS accounts, Computer Name, FileVault, automatic login and Sharing
-settings for you to configure at the guided pauses. It finishes with local checks.
-Existing Tailscale SSH sessions may disconnect. Keep local access available.
+Complete macOS preparation in step 2 BEFORE proceeding. This installs Homebrew
+and the Tailscale formula if missing, reuses or starts the system boot service,
+connects/enrolls if needed, and advertises exit-node service. No existing formula
+is upgraded. No accounts, FileVault, login, Sharing or firewall settings are changed.
 PLAN
-  printf 'Type SETUP to apply these changes: '
+  if [ "$PROFILE" = server ]; then
+    printf 'Local server setup selects native SSH (Tailscale SSH off) and allows incoming tailnet connections.\n'
+  else
+    printf 'Home setup preserves existing Tailscale SSH, incoming-access, DNS and routing preferences.\n'
+  fi
+  if [ -n "$NAME" ]; then printf 'Explicitly selected Tailscale name: %s\n' "$NAME";
+  else printf 'Preserve the current Tailscale name.\n'; fi
+  printf 'Type SETUP to confirm preparation is complete and apply these changes: '
   IFS= read -r CONFIRM
   [ "$CONFIRM" = SETUP ] || { printf 'Cancelled.\n'; exit 0; }
 
-  # Complete macOS settings first
-  #
-  # Open Settings and pause at guide step 3. Then validate/cache sudo authorization;
-  # sudo may ask for the local administrator password.
-  open -a 'System Settings'
-  manual_step 3
-  sudo -v
-
-  # Install Homebrew only when missing
-  #
-  # Create a private temporary directory and arrange its removal on shell exit.
-  # Download the official installer over HTTPS, allowing HTTPS redirects only.
-  # Reject HTTP errors; allow 15 seconds to connect and 120 seconds for the download.
-  # Run it as the current user with normal prompts. Then remove the temporary files,
-  # clear the cleanup trap, and verify Homebrew exists at a supported default path.
-  # An unhandled download/installer failure stops setup before it can continue.
+  # Install only missing dependencies, under the account user. Keep one cleanup
+  # trap for all temporary files so an interrupted install can be rerun safely.
   if [ -z "$BREW" ]; then
-    INSTALLER_DIR=$(mktemp -d)
-    trap 'rm -rf "$INSTALLER_DIR"' EXIT
     curl --proto '=https' --proto-redir '=https' --fail --location --show-error \
       --connect-timeout 15 --max-time 120 \
       https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh \
-      -o "$INSTALLER_DIR/homebrew-install.sh"
-    /bin/bash "$INSTALLER_DIR/homebrew-install.sh"
-    rm -rf "$INSTALLER_DIR"
-    trap - EXIT
+      -o "$TMP/homebrew-install.sh"
+    /bin/bash "$TMP/homebrew-install.sh"
     if [ -x /opt/homebrew/bin/brew ]; then BREW=/opt/homebrew/bin/brew;
     elif [ -x /usr/local/bin/brew ]; then BREW=/usr/local/bin/brew;
     else die 'Homebrew installation did not finish. Resolve its error, then rerun setup.'; fi
   fi
-
-  # Install the Tailscale formula if needed
-  #
-  # Derive the CLI path by replacing the final /brew with /tailscale. Probe for the
-  # installed formula, suppressing probe output. ! reverses the probe's exit status,
-  # so installation runs only when the probe fails. Existing formulas are not upgraded.
   TS="${BREW%/brew}/tailscale"
-  if ! "$BREW" list --formula tailscale >/dev/null 2>&1; then
-    "$BREW" install --formula tailscale
+  if ! "$BREW" list --formula tailscale >/dev/null 2>&1; then "$BREW" install --formula tailscale; fi
+  sudo -v
+  if [ -f /Library/LaunchDaemons/homebrew.mxcl.tailscale.plist ] &&
+    sudo -n launchctl print system/homebrew.mxcl.tailscale >"$TMP/service" 2>/dev/null &&
+    grep -q 'state = running' "$TMP/service"; then
+    setup_progress 'Tailscale system service already running; no restart requested.'
+  else sudo -n "$BREW" services start tailscale; fi
+  if run_timed sudo -n "$TS" status --json >"$TMP/status" 2>/dev/null &&
+    [ "$(field "$TMP/status" BackendState)" = Running ]; then
+    setup_progress 'Tailscale already connected; no enrollment requested.'
+  else
+    printf 'Open any printed login URL in your browser and verify the intended tailnet.\n'
+    sudo "$TS" up
   fi
 
-  # Start and configure Tailscale, then set power recovery
-  #
-  # sudo registers the service in launchd's system domain so it starts at boot.
-  # Bare "up" preserves saved preferences and offers browser login when needed.
-  # "set" changes the name, advertises exit service, disables Tailscale SSH in favor
-  # of macOS SSH, and permits incoming connections subject to tailnet access rules.
-  # pmset applies no system sleep and power-failure restart to all power profiles.
-  # Finally, display status and the Tailscale IPv4 address for the user to verify.
-  sudo "$BREW" services start tailscale
-  sudo "$TS" up
-  sudo "$TS" set --hostname="$NAME" --advertise-exit-node=true --ssh=false --shields-up=false
-  sudo pmset -a sleep 0 autorestart 1
-  sudo "$TS" status
-  sudo "$TS" ip -4
-
-  # Complete the remaining manual settings
-  #
-  # Pause for SSH/Screen Sharing permissions, open Tailscale's device console,
-  # and pause for exit-node approval, node expiry and access-rule checks.
-  manual_step 5
-  open https://login.tailscale.com/admin/machines
-  manual_step 6
-
-  # Check locally and show the external tests
-  #
-  # Run this same file in check mode with sudo. Capture any failure code instead
-  # of stopping, so guide step 7 is still displayed. Return the checker's exit code.
+  # A nonempty array is compatible with macOS Bash 3.2 and nounset. Home changes
+  # only advertisement, plus any explicit hostname/power choices.
+  TS_ARGS=(set --advertise-exit-node=true)
+  if [ "$PROFILE" = server ]; then TS_ARGS+=(--ssh=false --shields-up=false); fi
+  if [ -n "$NAME" ]; then TS_ARGS+=(--hostname="$NAME"); fi
+  sudo -v
+  sudo -n "$TS" "${TS_ARGS[@]}"
+  if [ "$ALWAYS_ON" = true ] || [ "$POWER_RECOVERY" = true ]; then
+    pmset -g custom >"$TMP/power"
+    validate_selected_power "$TMP/power"
+    apply_power_settings "$TMP/power"
+  fi
+  sudo -n "$TS" status
+  sudo -n "$TS" ip -4
   RESULT=0
-  sudo /bin/bash "$0" check || RESULT=$?
-  show_step 7
+  finish_setup || RESULT=$?
   printf 'No reboot was requested. No existing formula was upgraded.\n'
   exit "$RESULT"
 fi
