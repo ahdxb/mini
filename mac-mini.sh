@@ -1,19 +1,24 @@
 #!/bin/bash
 # START GUIDE
 # Mac mini with Tailscale exit node: server and home setup, checks, and recovery.
-# Last updated 2026-10-19.
+# Last updated 2026-10-21.
 # Download:  https://ahdxb.github.io/mini/mac-mini.sh
 # Fallback:  https://gist.githubusercontent.com/ahdxb/7dc7377a171872ef677cedc8eff592bc/raw/mac-mini.sh
 # Source:    https://github.com/ahdxb/Sonar (private; published to Pages and Gist)
 #
 # PROFILES
+#   Two profiles are available: home (default), and server.
 #   A profile determines which settings setup applies and which checks must pass.
-#   Both profiles use the Homebrew Tailscale system service and advertise the
-#   Mini as an exit node. Neither profile changes FileVault, accounts, login
-#   settings, Screen Sharing or the firewall automatically. Screen Sharing is
-#   optional in both profiles. Profiles are not saved: repeat the same profile/
-#   options on later checks and reruns. Choosing home later does not undo settings
-#   previously applied by server or by explicit power options.
+#   Profiles are not saved: repeat the same profile/options on later checks and reruns.
+#
+#   Both profiles:
+#   - use the Homebrew Tailscale system service and advertise the Mini as an exit node;
+#   - prevent computer sleep and enable restart after power failure;
+#   - keep existing settings for FileVault, accounts, login settings, Screen Sharing
+#     or firewall;
+#   - have Screen Sharing as optional;
+#   - use the same SSH settings and options (see below);
+#   - support local and SSH setup.
 #
 # +--------------------+-------------------------------+-------------------------------+
 # | Profile            | home (default)                | server                        |
@@ -21,79 +26,57 @@
 # | Intended use       | Exit node + everyday computer | Dedicated unattended exit     |
 # |                    | (e.g. My Mac Mini M4)         | node (e.g. Le Mac Mini)       |
 # +====================+===============================+===============================+
-# | FileVault          | Keep the current setting;     | Must be OFF to pass; the      |
-# |                    | ON is accepted                | script does not disable it    |
+# | FileVault          | Keep the current setting;     | Keep the current setting;     |
+# |                    | ON is accepted                | Must be OFF to pass           |
 # +--------------------+-------------------------------+-------------------------------+
-# | Computer sleep     | Keep, unless --always-on      | Sets to OFF; the display      |
-# |                    | is requested                  | may still sleep               |
-# +--------------------+-------------------------------+-------------------------------+
-# | Restart after      | Keep, unless                  | Sets to ON                    |
-# | power failure      | --restart-after-power-failure |                               |
-# |                    | is requested                  |                               |
-# +--------------------+-------------------------------+-------------------------------+
-# | SSH method         | native by default; select     | native by default; select     |
-# |                    | --ssh tailscale if used       | --ssh tailscale if used       |
-# |                    | Preserve existing settings    | Preserve existing settings    |
-# +--------------------+-------------------------------+-------------------------------+
-# | Incoming           | Keep the setting; checks      | Local setup allows them; SSH  |
-# | connections over   | require connections to be     | setup requires them already   |
-# | Tailscale          | allowed                       | allowed                       |
+# | Incoming           | Keep the current setting;     | Local setup allows them; SSH  |
+# | connections over   | Must be ON to pass            | setup requires them already   |
+# | Tailscale          |                               | allowed                       |
 # +--------------------+-------------------------------+-------------------------------+
 # | Recovery after     | With FileVault ON, requires   | Designed to resume services   |
 # | cold boot          | an unlock locally or through  | without a disk unlock,        |
 # |                    | a supported, independently    | provided power, macOS and     |
 # |                    | reachable SSH-unlock path     | networking recover            |
 # +--------------------+-------------------------------+-------------------------------+
-# | Local and SSH      | Both supported                | Both supported                |
-# | setup              |                               |                               |
-# +--------------------+-------------------------------+-------------------------------+
 #
 # COMMAND REFERENCE
-#   Read the guide
+#   Read the guide:
 #     bash mac-mini.sh | less
 #     Pager keys: Space = next page, b = back, / = search, q = quit.
 #
-#   Set up locally, after completing macOS preparation
+#   Set up locally, after completing macOS preparation:
 #     bash mac-mini.sh setup --profile PROFILE
 #     (PROFILE must be lowercase home or server; defaults to home without --profile)
 #
-#   Set up over SSH, on an already prepared computer
+#   Set up over SSH, on an already prepared computer:
 #     bash mac-mini.sh setup-remote --profile PROFILE
-#     (See "Terminal access over SSH" after step 7 for connection instructions
-#     and prerequisites)
+#     (See "Terminal access over SSH" after step 7)
 #
-#   Check settings without changing configuration
+#   Check settings without changing configuration:
 #     sudo bash mac-mini.sh check --profile PROFILE
 #
 # OPTIONAL SETTINGS
-#   Add these options to setup, setup-remote or check as needed:
-#     --always-on : prevent computer sleep
-#     --restart-after-power-failure : enable power recovery
-#     --ssh native|tailscale : choose SSH checks independently of the profile
-#       native (default): require macOS Remote Login and Tailscale SSH OFF.
-#       tailscale: require Tailscale SSH ON; native Remote Login is optional.
+#   Options to setup, setup-remote, and check:
+#     --ssh native (default): require macOS Remote Login and Tailscale SSH OFF.
+#     --ssh tailscale: require Tailscale SSH ON; native Remote Login is optional.
 #       Setup never enables/disables either SSH service or changes access rules.
 #       Prepare the selected method separately; a mismatch stops setup.
-#       Repeat this option on checks and reruns. Home Tailscale SSH users should
-#       select --ssh tailscale for setup; checks can also use --ssh any.
+#       Repeat this option on checks and reruns.
 #
-#   Check only: --ssh any
-#     Accept either native SSH or Tailscale SSH without requiring a specific
-#     method. This never changes settings and cannot verify remote authentication.
-#
-#   Example for the French Mini using its existing Tailscale SSH access:
-#     sudo bash ~/mac-mini.sh check --profile server --ssh tailscale
-#     sudo bash ~/mac-mini.sh check --profile server --ssh any
-#     bash ~/mac-mini.sh setup-remote --profile server --ssh tailscale
-#
-#   Check only: --require-screen-sharing
-#     Require the optional Screen Sharing service to accept connections.
-#   Local setup only: --hostname NAME
-#     Explicitly change the Tailscale name. Otherwise, keep the current name.
+#   Options to check only:
+#     --ssh any: accept either native SSH or Tailscale SSH without requiring a specific
+#       method. This never changes settings and cannot verify remote authentication.
+#     --require-screen-sharing: require the Screen Sharing service to accept connections.
+
+#   Options to local setup only:
+#     --hostname NAME: explicitly change the Tailscale name. Otherwise, keep the
+#       current name.
 #
 #   Run setup as your administrator account without sudo; it requests sudo when
 #   needed. Run check with sudo, as shown above. Help and check make no changes.
 #
+# MACHINE SETUP GUIDELINES
+# ------------------------
 # 1. CREATE OR KEEP THE ADMINISTRATOR ACCOUNT
 #   Choose home or server using the explanations above.
 #   For a new Mini, connect Ethernet, display, keyboard and mouse and complete
@@ -126,6 +109,8 @@
 #     password off. Remote Management must be off to enable Screen Sharing.
 #   - If a firewall is enabled, permit the services you intend to use. Do not
 #     enable "Block all incoming connections" for these remote services.
+#   - Setup prevents computer sleep and enables restart after power failure.
+#     The display may still sleep. Neither setting changes FileVault.
 #   Server only:
 #   - FileVault OFF; verify it is fully off before setup. This reduces protection
 #     against physical access to data. Keep sensitive personal data off this server.
@@ -136,14 +121,11 @@
 #   - If Energy offers "Start up when power is connected" > "Always", choose it
 #     if desired. Setup also enables restart after power failure.
 #   Home:
-#   - Keep your existing FileVault, account, login, lock-screen and power choices.
+#   - Keep your existing FileVault, account, login and lock-screen choices.
 #     FileVault ON is valid and is not a failed home check. An unattended cold
 #     boot requires an unlock before the Tailscale daemon can return. On supported
 #     Macs, this may be possible over SSH using a separate network path; see
 #     "FileVault and recovery" below.
-#   - An exit node is unavailable while the computer sleeps. Choose --always-on
-#     only if continuous availability is wanted. Power recovery is a separate
-#     opt-in: --restart-after-power-failure. Neither option changes FileVault.
 #   Finish macOS preparation before downloading and launching setup below.
 #
 # 3. DOWNLOAD AND READ THE SCRIPT
@@ -160,10 +142,6 @@
 #
 #     bash ~/mac-mini.sh setup --profile server --hostname le-mac-mini
 #     bash ~/mac-mini.sh setup --profile home
-#
-#   Optional home power changes, chosen explicitly:
-#
-#     bash ~/mac-mini.sh setup --profile home --always-on --restart-after-power-failure
 #
 #   Use a unique --hostname for each Mini if renaming. Setup verifies prerequisites,
 #   shows the selected profile and changes, and asks you to type SETUP. It does
@@ -201,14 +179,13 @@
 #   After completing this step, type DONE for setup to run local checks.
 #
 # 6. RUN CHECKS FOR THE SAME PROFILE AND OPTIONS
-#   Setup passes its profile, SSH method and power options to the checker.
+#   Setup passes its profile and SSH method to the checker.
 #   To run it again locally or through SSH:
 #
 #     sudo bash ~/mac-mini.sh check --profile server
 #     sudo bash ~/mac-mini.sh check --profile server --ssh tailscale
 #     sudo bash ~/mac-mini.sh check --profile server --ssh any
 #     sudo bash ~/mac-mini.sh check --profile home
-#     sudo bash ~/mac-mini.sh check --profile home --always-on --restart-after-power-failure
 #
 #   Add --require-screen-sharing only if you require that service. Native port
 #   22 is required only with --ssh native; port 5900 is informational by default.
@@ -219,18 +196,18 @@
 #   These online lookups time out after 8 seconds each. They do not install,
 #   upgrade or restart anything. Available updates and lookup failures do not
 #   affect the check's exit status. Formula rebuild revisions are not compared.
-#   Server checks require FileVault fully off, sleep=0 and power recovery=1.
-#   Home reports FileVault and unselected power settings as information; it
-#   checks only explicitly selected power requirements. Both profiles require
-#   the selected SSH method: native requires Tailscale SSH OFF; tailscale
-#   requires it ON. Check-only --ssh any accepts either available method.
+#   Both profiles require sleep=0 and power recovery=1. Server checks also
+#   require FileVault fully off; home reports FileVault as information.
+#   Both profiles require the selected SSH method: native requires Tailscale
+#   SSH OFF; tailscale requires it ON. Check-only --ssh any accepts either
+#   available method.
 #   A local Tailscale SSH setting does not prove that a client
 #   can authenticate; test a NEW authorized connection from another device.
 #   Both profiles check Tailscale connectivity, exit-node advertisement/approval,
 #   incoming connections over Tailscale and the Homebrew system service.
 #   Exit 0 means local checks passed, 1 means a failure, and 2 means incomplete
-#   or unsupported checks. FileVault ON or ordinary sleep is not a home failure
-#   unless you explicitly require always-on power settings that are not met.
+#   or unsupported checks. FileVault ON is not a home failure. Computer sleep
+#   enabled or restart after power failure disabled fails either profile.
 #   The checker recognizes competing Tailscale installations without launching,
 #   replacing or removing them. This file supports the Homebrew daemon only.
 #   Local ports do not prove authentication. Exit-node approval is the daemon's
@@ -256,7 +233,7 @@
 #     disk unlock locally or, on supported Macs, over the separate SSH path
 #     described under "FileVault and recovery". Authentication is still needed;
 #     test the actual cold-boot/power-recovery case before relying on it.
-#     If sleep is allowed, verify and accept that services are unavailable asleep.
+#     Verify services remain available when the display sleeps.
 #   - Test chosen power-recovery behavior in a planned local maintenance window.
 #     Never pull power during updates or writes. Normal shutdown does not test
 #     restart after power failure. Record the recovery case actually tested.
@@ -288,11 +265,11 @@
 #     # For an existing Tailscale SSH connection, use instead:
 #     bash ~/mac-mini.sh setup-remote --profile server --ssh tailscale
 #
-#   For the home Mini, use "setup-remote --profile home" instead; add either home
-#   power option only if wanted. Do not prefix setup-remote with sudo. It verifies
+#   For the home Mini, use "setup-remote --profile home" instead. Both profiles
+#   apply the same power settings. Do not prefix setup-remote with sudo. It verifies
 #   prerequisites, shows the identity/profile and asks for SETUP. It preserves
 #   name, tailnet, SSH/DNS/routing/access preferences and running services, changing
-#   only exit-node advertisement and selected power settings. It never opens GUI
+#   only exit-node advertisement and required power settings. It never opens GUI
 #   apps, upgrades software, reauthenticates, restarts services or reboots.
 #   Keep a second SSH session open, then verify a NEW connection afterward.
 #   Open printed approval URLs on your own computer. Each run prints a private
@@ -418,14 +395,11 @@ if [ "$MODE" = help ] || [ "$MODE" = --help ]; then
   exit 0
 fi
 
-# Parse explicit profile/options. Default to home so bare commands do not
-# silently impose unattended-server requirements on an everyday Mac.
+# Parse explicit profile/options. Default to home, which accepts FileVault ON.
 case "$MODE" in setup|setup-remote|check) ;; *) die 'Choose help, setup, setup-remote, or check.' ;; esac
 shift
 PROFILE=home
 SSH_MODE=native
-ALWAYS_ON=false
-POWER_RECOVERY=false
 REQUIRE_SCREEN_SHARING=false
 NAME=''
 while [ $# -gt 0 ]; do
@@ -436,8 +410,6 @@ while [ $# -gt 0 ]; do
     --ssh)
       [ $# -ge 2 ] || die '--ssh requires native, tailscale, or any (check only).'
       SSH_MODE=$2; shift 2 ;;
-    --always-on) ALWAYS_ON=true; shift ;;
-    --restart-after-power-failure) POWER_RECOVERY=true; shift ;;
     --require-screen-sharing)
       [ "$MODE" = check ] || die '--require-screen-sharing is a check option.'
       REQUIRE_SCREEN_SHARING=true; shift ;;
@@ -451,8 +423,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$PROFILE" in
-  server) ALWAYS_ON=true; POWER_RECOVERY=true ;;
-  home) ;;
+  home|server) ;;
   *) die '--profile must be home or server.' ;;
 esac
 case "$SSH_MODE" in
@@ -573,21 +544,13 @@ check_tailscale_installation() {
   done
 }
 
-# Profile choices affect only these power requirements; unselected values are
-# never written. Used by local setup, SSH setup, and the read-only checker.
-power_selected() {
-  case "$1" in
-    sleep) [ "$ALWAYS_ON" = true ] ;;
-    autorestart) [ "$POWER_RECOVERY" = true ] ;;
-  esac
-}
-validate_selected_power() {
+# Both profiles require these power settings. Used by local setup, SSH setup,
+# and the read-only checker.
+validate_power_settings() {
   local key
   for key in sleep autorestart; do
-    if power_selected "$key"; then
-      awk -v k="$key" '$1==k {n++; if ($2 !~ /^[0-9]+$/) bad=1} END {exit !(n && !bad)}' "$1" ||
-        die "Cannot verify selected power setting $key."
-    fi
+    awk -v k="$key" '$1==k {n++; if ($2 !~ /^[0-9]+$/) bad=1} END {exit !(n && !bad)}' "$1" ||
+      die "Cannot verify required power setting $key."
   done
 }
 setup_progress() { printf '%s\n' "$*"; }
@@ -595,14 +558,12 @@ apply_power_settings() {
   local setting key value
   for setting in sleep:0 autorestart:1; do
     key=${setting%:*}; value=${setting#*:}
-    if power_selected "$key"; then
-      if awk -v k="$key" -v v="$value" '$1==k {n++; if ($2!=v) bad=1} END {exit !(n && !bad)}' "$1"; then
-        setup_progress "Power setting $key=$value already applied; skipped."
-      else
-        setup_progress "Applying power setting $key=$value."
-        sudo -n pmset -a "$key" "$value"
-        setup_progress "Power setting $key=$value applied."
-      fi
+    if awk -v k="$key" -v v="$value" '$1==k {n++; if ($2!=v) bad=1} END {exit !(n && !bad)}' "$1"; then
+      setup_progress "Power setting $key=$value already applied; skipped."
+    else
+      setup_progress "Applying power setting $key=$value."
+      sudo -n pmset -a "$key" "$value"
+      setup_progress "Power setting $key=$value applied."
     fi
   done
 }
@@ -612,26 +573,16 @@ show_profile_plan() {
   if [ "$PROFILE" = server ]; then
     printf 'FileVault must already be OFF; accounts and security settings remain manual.\n'
   else
-    printf 'Preserve FileVault, accounts, login, lock-screen and unselected power settings.\n'
+    printf 'Preserve FileVault, accounts, login and lock-screen settings.\n'
   fi
-  if [ "$ALWAYS_ON" = true ]; then
-    printf 'Selected: prevent computer sleep (sleep=0).\n'
-  else
-    printf 'Preserve computer sleep; exit-node availability follows its sleep schedule.\n'
-  fi
-  if [ "$POWER_RECOVERY" = true ]; then
-    printf 'Selected: enable restart after power failure (autorestart=1).\n'
-  else
-    printf 'Preserve restart-after-power-failure setting.\n'
-  fi
+  printf 'Required: prevent computer sleep (sleep=0).\n'
+  printf 'Required: enable restart after power failure (autorestart=1).\n'
 }
 # Pass exactly the selected requirements to the child checker. Profiles are
 # explicit per invocation, so this does not depend on sudo preserving variables.
 finish_setup() {
   local result=0
   local check_args=(check --profile "$PROFILE" --ssh "$SSH_MODE")
-  if [ "$ALWAYS_ON" = true ]; then check_args+=(--always-on); fi
-  if [ "$POWER_RECOVERY" = true ]; then check_args+=(--restart-after-power-failure); fi
   manual_step 5
   sudo /bin/bash "$0" "${check_args[@]}" || result=$?
   show_step 7
@@ -796,23 +747,17 @@ if [ "$MODE" = check ]; then
                                   # If the dump says "running", report PASS
   else fail 'Expected Homebrew Tailscale startup service is missing or stopped'; fi
 
-  # Check only power settings selected by the profile/options. Unselected home
-  # settings and FileVault are informational, including when they are unreadable.
+  # Both profiles require computer sleep off and restart after power failure on.
   if pmset -g custom >"$TMP/power" 2>/dev/null; then
     for setting in sleep:0 autorestart:1; do
       key=${setting%:*}; value=${setting#*:}
-      if power_selected "$key"; then
-        if awk -v k="$key" -v v="$value" '$1==k {n++; if ($2!=v) bad=1} END {exit !(n && !bad)}' "$TMP/power"; then
-          pass "Power setting $key=$value"
-        else fail "Selected power setting $key should be $value"; fi
-      else
-        VALUES=$(awk -v k="$key" '$1==k {print $2}' "$TMP/power")
-        printf 'INFO     Power setting %s=%s (home choice preserved)\n' "$key" "${VALUES:-unknown}"
-      fi
+      if awk -v k="$key" -v v="$value" '$1==k {n++; if ($2!=v) bad=1} END {exit !(n && !bad)}' "$TMP/power"; then
+        pass "Power setting $key=$value"
+      else fail "Required power setting $key should be $value"; fi
     done
-  elif [ "$ALWAYS_ON" = true ] || [ "$POWER_RECOVERY" = true ]; then
-    unknown 'Cannot read selected power settings'
-  else printf 'INFO     Cannot read power settings (home choices preserved)\n'; fi
+  else
+    unknown 'Cannot read required power settings'
+  fi
 
   if fdesetup status >"$TMP/filevault" 2>/dev/null; then
     if [ "$PROFILE" = server ]; then
@@ -909,8 +854,8 @@ if [ "$MODE" = check ]; then
   # exit 0 after the success message. This means only the local checks passed.
   printf '\nMANUAL: verify identity, node expiry, client permissions, remote SSH, optional\n'
   printf 'Screen Sharing, exit-node browsing and DNS. Follow step 7 for profile %s.\n' "$PROFILE"
-  printf 'Local TCP is not an authentication test. Home sleep/FileVault choices can\n'
-  printf 'limit availability and cold-boot recovery. No alerts or repairs are made.\n'
+  printf 'Local TCP is not an authentication test. Home FileVault settings can\n'
+  printf 'limit cold-boot recovery. No alerts or repairs are made.\n'
   printf '\nResult: %s failed; %s unknown.\n' "$BAD" "$UNKNOWN"
   [ "$BAD" = 0 ] || exit 1
   [ "$UNKNOWN" = 0 ] || exit 2
@@ -986,10 +931,8 @@ if [ "$MODE" = setup-remote ]; then
       sudo -n fdesetup status >"$TMP/filevault" || die 'Cannot verify FileVault. Complete local preparation first.'
       grep -Fxq 'FileVault is Off.' "$TMP/filevault" || die 'Server profile requires FileVault fully off. Resolve locally first.'
     fi
-    if [ "$ALWAYS_ON" = true ] || [ "$POWER_RECOVERY" = true ]; then
-      pmset -g custom >"$TMP/power" || die 'Cannot read selected power settings.'
-      validate_selected_power "$TMP/power"
-    fi
+    pmset -g custom >"$TMP/power" || die 'Cannot read required power settings.'
+    validate_power_settings "$TMP/power"
   }
 
   remote_preflight
@@ -999,7 +942,7 @@ if [ "$MODE" = setup-remote ]; then
   printf 'Existing identity: %s / %s\n' "$REMOTE_TAILNET" "$REMOTE_NAME"
   show_profile_plan
   cat <<'REMOTE_PLAN'
-This advertises this Mini as an exit node and applies only selected power settings.
+This advertises this Mini as an exit node and applies required power settings.
 Completed settings are skipped on reruns. It preserves the existing name, tailnet,
 SSH/DNS/routing/access preferences and running services. No installs, upgrades,
 GUI apps, service restarts or reboots are requested. Verify the identity above.
@@ -1022,9 +965,7 @@ REMOTE_PLAN
     sudo -n "$TS" set --advertise-exit-node=true
     setup_progress 'Exit-node advertisement enabled.'
   fi
-  if [ "$ALWAYS_ON" = true ] || [ "$POWER_RECOVERY" = true ]; then
-    apply_power_settings "$TMP/power"
-  fi
+  apply_power_settings "$TMP/power"
   setup_progress 'Configuration applied. Exit-node approval and external tests remain.'
   RESULT=0
   finish_setup || RESULT=$?
@@ -1063,10 +1004,8 @@ if [ "$MODE" = setup ]; then
     sudo -n fdesetup status >"$TMP/filevault" || die 'Cannot verify FileVault. Complete macOS preparation first.'
     grep -Fxq 'FileVault is Off.' "$TMP/filevault" || die 'Server profile requires FileVault fully off. Complete step 2 first.'
   fi
-  if [ "$ALWAYS_ON" = true ] || [ "$POWER_RECOVERY" = true ]; then
-    pmset -g custom >"$TMP/power" || die 'Cannot read selected power settings.'
-    validate_selected_power "$TMP/power"
-  fi
+  pmset -g custom >"$TMP/power" || die 'Cannot read required power settings.'
+  validate_power_settings "$TMP/power"
   show_profile_plan
   cat <<'PLAN'
 Complete macOS preparation in step 2 BEFORE proceeding. This installs Homebrew
@@ -1117,17 +1056,15 @@ PLAN
   require_selected_ssh "$TMP/prefs"
 
   # A nonempty array is compatible with macOS Bash 3.2 and nounset. Home changes
-  # only advertisement, plus any explicit hostname/power choices.
+  # advertisement and an explicit hostname here; power settings follow below.
   TS_ARGS=(set --advertise-exit-node=true)
   if [ "$PROFILE" = server ]; then TS_ARGS+=(--shields-up=false); fi
   if [ -n "$NAME" ]; then TS_ARGS+=(--hostname="$NAME"); fi
   sudo -v
   sudo -n "$TS" "${TS_ARGS[@]}"
-  if [ "$ALWAYS_ON" = true ] || [ "$POWER_RECOVERY" = true ]; then
-    pmset -g custom >"$TMP/power"
-    validate_selected_power "$TMP/power"
-    apply_power_settings "$TMP/power"
-  fi
+  pmset -g custom >"$TMP/power"
+  validate_power_settings "$TMP/power"
+  apply_power_settings "$TMP/power"
   sudo -n "$TS" status
   sudo -n "$TS" ip -4
   RESULT=0
