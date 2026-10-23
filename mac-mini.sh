@@ -1,7 +1,7 @@
 #!/bin/bash
 # START GUIDE
 # Mac mini with Tailscale exit node: server and home setup, checks, and recovery.
-# Last updated 2026-10-21.
+# Last updated 2026-10-23.
 # Download:  https://ahdxb.github.io/mini/mac-mini.sh
 # Fallback:  https://gist.githubusercontent.com/ahdxb/7dc7377a171872ef677cedc8eff592bc/raw/mac-mini.sh
 # Source:    https://github.com/ahdxb/Sonar (private; published to Pages and Gist)
@@ -90,25 +90,26 @@
 #   For both profiles:
 #   - Install current stable macOS updates, restart, and finish any prompts.
 #     On a deployed remote Mini, schedule updates separately with a recovery plan.
-#   - Verify networking and automatic date/time. Ethernet is recommended; DHCP
-#     is sufficient. Keep router inbound protection; do not forward ports 22/5900.
+#   - Verify networking (Ethernet is recommended; DHCP is OK) and automatic date/time.
 #   - Keep or choose a Computer Name. This is separate from --hostname, which
 #     changes only the Tailscale name.
 #   - With --ssh native (default), enable Remote Login for the intended account
 #     in System Settings > General > Sharing. Choose permitted users and prepare
-#     Mac-account/key authentication. Tailscale SSH must already be OFF.
+#     Mac-account/key authentication. Tailscale SSH must already be OFF. To check:
+#       sudo tailscale debug prefs | plutil -extract RunSSH raw -expect bool -o - -
+#     must return false (if tailscale is already installed).
 #   - With --ssh tailscale, prepare the Homebrew Tailscale system service with
 #     Tailscale SSH already ON, and configure/test its network and SSH access
 #     rules. Native Remote Login is optional. Do not switch SSH methods through
 #     your only working connection; keep another tested access method available.
 #     See https://tailscale.com/docs/features/tailscale-ssh for preparation.
-#   - Setup preserves SSH settings in both profiles. Full-disk access is
-#     unnecessary merely to connect. The script never edits SSH permissions.
+#   - Setup preserves SSH settings in both profiles; the script never edits
+#     SSH permissions.
 #   - Screen Sharing is optional. Enable it only if wanted, restrict permitted
 #     users, and use normal Mac-account authentication. Leave the legacy VNC
 #     password off. Remote Management must be off to enable Screen Sharing.
-#   - If a firewall is enabled, permit the services you intend to use. Do not
-#     enable "Block all incoming connections" for these remote services.
+#   - If the Mini's macOS firewall is enabled, permit the services you intend
+#     to use. Do not enable "Block all incoming connections" for these services.
 #   - Setup prevents computer sleep and enables restart after power failure.
 #     The display may still sleep. Neither setting changes FileVault.
 #   Server only:
@@ -135,7 +136,6 @@
 #     bash ~/mac-mini.sh | less
 #
 #   Read the script itself with "less ~/mac-mini.sh" before running setup.
-#   No Git, GitHub CLI or access token is needed. Keep a downloaded recovery copy.
 #
 # 4. RUN LOCAL SETUP AFTER PREPARATION
 #   Choose the intended command; do not prefix setup with sudo:
@@ -151,7 +151,10 @@
 #     https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
 #   The installer may request sudo and install Command Line Tools. Full Xcode is
 #   unnecessary. If installation fails, resolve the installer error and rerun.
-#   Homebrew runs as your account, not root. Existing formulae are not upgraded.
+#   Package installation runs as your account; the system service is started
+#   with sudo. Homebrew takes root ownership of selected service paths and warns
+#   that upgrades/reinstalls/uninstalls can require manual cleanup (see UPDATES).
+#   Existing formulae are not upgraded.
 #   Do not install a second Tailscale app/cask. If one already exists, setup stops
 #   without replacing it; resolve installation choice locally first.
 #   Setup reuses a healthy running system daemon. If necessary locally, it starts
@@ -205,6 +208,8 @@
 #   can authenticate; test a NEW authorized connection from another device.
 #   Both profiles check Tailscale connectivity, exit-node advertisement/approval,
 #   incoming connections over Tailscale and the Homebrew system service.
+#   Launch-file checks cover paths, ownership and Unix write bits only. See
+#   UPDATES AND LIMITS for their security limits and maintenance guidance.
 #   Exit 0 means local checks passed, 1 means a failure, and 2 means incomplete
 #   or unsupported checks. FileVault ON is not a home failure. Computer sleep
 #   enabled or restart after power failure disabled fails either profile.
@@ -212,6 +217,25 @@
 #   replacing or removing them. This file supports the Homebrew daemon only.
 #   Local ports do not prove authentication. Exit-node approval is the daemon's
 #   report, not a fresh admin-console query. Complete the external tests below.
+#
+# NETWORK AND ROUTER ADVICE (SEPARATE FROM MINI SETUP)
+#   This advice depends on your network. The script does not inspect or change
+#   router settings and does not require a particular router or firewall.
+#   - If your router has a firewall that blocks unsolicited internet connections,
+#     keep it enabled. Do not forward public TCP ports 22 (SSH) or 5900 (Screen
+#     Sharing) to the Mini. Use its Tailscale address for remote access.
+#   - For FileVault SSH unlock from another site, arrange an independent network
+#     path to the Mini's LAN address. The locked Mini cannot provide its own
+#     Tailscale connection or exit node. Options include:
+#     - Another always-on device at that site acting as a Tailscale subnet router.
+#     - A suitable VPN on the site's router or another independent VPN gateway.
+#
+#       Your computer -> separate VPN/subnet router -> Mini's LAN IP -> SSH unlock
+#
+#     The separate router/gateway and site network must also survive or recover
+#     from an outage. See "FileVault and recovery" below for unlock requirements.
+#   - Consider a UPS for the Mini and network equipment to improve recovery
+#     from power interruptions.
 #
 # 7. TEST REMOTE ACCESS, EXIT ROUTING AND RECOVERY
 #   From another device on the same tailnet, preferably on a different Internet
@@ -299,19 +323,11 @@
 #     This native startup SSH service is separate from Tailscale SSH and from
 #     running "setup-remote" after the Mac is unlocked.
 #
-#   A separate network path is necessary when accessing it from another site
-#     The locked Mini cannot provide its own Tailscale connection or exit node.
-#     Reach its LAN address through an independent, available path instead:
-#     - Another always-on device at that site acting as a Tailscale subnet router.
-#     - A suitable VPN on the site's router or another independent VPN gateway.
-#     A device already on the same LAN can connect directly if networking permits.
-#
-#       Your computer -> separate VPN/subnet router -> Mini's LAN IP -> SSH unlock
-#
-#     The separate router/gateway and site network must also survive or recover
-#     from the outage. After the unlock, macOS can start the normal Tailscale
-#     daemon and exit-node service. The Mini's own Tailscale IP is not a route to
-#     its pre-unlock SSH service. Do not expose SSH by forwarding Internet port 22.
+#   From another site, use the independent network path described under
+#   "Network and router advice" above. A device already on the same LAN can
+#   connect directly if networking permits. The Mini's own Tailscale IP is not
+#   a route to its pre-unlock SSH service. After the unlock, macOS can start the
+#   normal Tailscale daemon and exit-node service.
 #
 #   SSH unlock enables remote intervention; it does not make recovery automatic.
 #   Verify hardware/OS support, authorized credentials, pre-unlock networking and
@@ -330,22 +346,43 @@
 #   changing known_hosts. Update saved SSH/Screen Sharing/exit-node selections.
 #
 # UPDATES AND LIMITS
-#   Update one Mini at a time with a recovery plan. On Apple Silicon:
+#   Update one Mini at a time with local access or a tested recovery path. The
+#   restart can disconnect SSH and exit-node clients; do not begin over your
+#   only connection without recovery. Complete upgrade AND restart in the same
+#   maintenance session. On Apple Silicon:
 #     /opt/homebrew/bin/brew update
 #     /opt/homebrew/bin/brew upgrade tailscale
 #     sudo /opt/homebrew/bin/brew services restart tailscale
-#   Intel Homebrew uses /usr/local instead. Service restarts may interrupt access;
-#   do not perform these over your only connection without a recovery path.
-#   Recheck the same profile/options and repeat external tests after updates.
-#   The root daemon starts at boot, but needs macOS, disk access and networking.
-#   Power recovery does not cover every shutdown, hang or failed update. Ethernet,
-#   a UPS for the Mini/router and local assistance improve recovery. This script
-#   installs no alerts. A local checker cannot prove remote access or exit routing.
+#   Intel Homebrew uses /usr/local. Inspect upgrade errors before continuing:
+#   cleanup can fail after installation succeeds, but other failures need repair.
+#   Upgrade selects a new, account-owned daemon through the opt link. A crash or
+#   reboot can launch it even while a planned restart is deferred. Restart
+#   reapplies selected root ownership changes; it need not fix writable modes.
+#   "services start" and either setup command leave an already running service
+#   alone. setup-remote never upgrades or restarts Tailscale.
+#
+#   Recheck the same profile/options, a NEW remote connection, and exit-node/DNS
+#   tests after restart. If restart fails, use recovery and retain both versions.
+#   Upgrade/reinstall/uninstall can leave protected remnants or .reinstall
+#   backups. Only after verifying the replacement works, review the exact obsolete
+#   Cellar/tailscale/<version> path in the cleanup error and remove that remnant
+#   with sudo rm -rf followed by its quoted absolute path. Never remove current
+#   versions, opt/linked paths, the whole Cellar/tailscale directory, or a version
+#   glob. Do not upgrade as root or chown the live keg to suppress cleanup errors.
+#
+#   Ownership checks inspect selected files and Unix write bits, not parent
+#   directories, ACLs, binary integrity or the running binary version. Homebrew's
+#   account-controlled paths prevent these checks from establishing a security
+#   boundary against that account or guaranteeing safe future launches.
+#   Boot recovery still needs macOS, disk access and networking. See "Network and
+#   router advice" for recovery planning. No alerts are installed; local checks
+#   cannot prove remote authentication or exit routing.
 #
 # KEEPING IT SHARED
 #   Sonar is the private master. Pushes to main publish only mac-mini.sh, the
 #   download index and .nojekyll to public ahdxb/mini, and update the secret Gist.
-#   Publishing also runs for workflow/template changes and manual dispatches.
+#   Publishing waits for Linux/macOS tests, including on workflow/template/test
+#   changes and manual dispatches. Pull requests run tests without publishing.
 #   Private Git history stays in Sonar; this script is public at BOTH destinations.
 #   Pages: https://ahdxb.github.io/mini/mac-mini.sh
 #   Gist fallback:
@@ -447,13 +484,14 @@ elif [ -x /usr/local/bin/brew ]; then BREW=/usr/local/bin/brew; fi
 # Print a numbered step from the guide
 # ------------------------------------
 # awk starts at the requested heading and stops at the next one, or at the
-# SSH reference after step 7. It removes comment markers before printing.
+# network advice after step 6 or SSH reference after step 7. It removes comment
+# markers before printing.
 # Inside awk, $0 means the input line; outside awk, "$0" is this script's path.
 show_step() {
   awk -v n="$1" '
     $0 ~ "^# " n "\\. " { show=1; found=1 }
     show && /^# [0-9]+\. / && $0 !~ "^# " n "\\. " { exit }
-    show && /^# (TERMINAL ACCESS OVER SSH|REPLACEMENT DETAILS)/ { exit }
+    show && /^# (NETWORK AND ROUTER ADVICE|TERMINAL ACCESS OVER SSH|REPLACEMENT DETAILS)/ { exit }
     show { sub(/^# ?/, ""); print }
     END { if (!found) exit 1 }
   ' "$0" || die "cannot display guide step $1"
@@ -534,14 +572,29 @@ require_selected_ssh() {
     die "Selected --ssh $SSH_MODE requires Tailscale SSH=$SSH_ENABLED. Setup preserves SSH settings; prepare the selected method separately or choose the method already in use."
 }
 
-# Refuse common competing installations without attempting a migration.
+# Discover common installation markers, not whether they are running. Both
+# setup and check use this list. A dangling marker also needs manual review.
+# Under sudo, use the invoking account's home rather than root's HOME. Keep
+# global results even when the invoking account's home cannot be resolved.
+find_tailscale_installations() {
+  local other account_home=$HOME
+  for other in /Applications/Tailscale.app \
+    /Library/LaunchDaemons/com.tailscale.tailscaled.plist; do
+    if [ -e "$other" ] || [ -L "$other" ]; then printf '%s\n' "$other"; fi
+  done
+  if [ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+    account_home=$(sudo -n -H -u "$SUDO_USER" printenv HOME 2>/dev/null) || return 1
+    case "$account_home" in /*) ;; *) return 1 ;; esac
+  fi
+  for other in "$account_home/Applications/Tailscale.app" \
+    "$account_home/Library/LaunchAgents/homebrew.mxcl.tailscale.plist"; do
+    if [ -e "$other" ] || [ -L "$other" ]; then printf '%s\n' "$other"; fi
+  done
+}
 check_tailscale_installation() {
   local other
-  for other in /Applications/Tailscale.app "$HOME/Applications/Tailscale.app" \
-    /Library/LaunchDaemons/com.tailscale.tailscaled.plist \
-    "$HOME/Library/LaunchAgents/homebrew.mxcl.tailscale.plist"; do
-    [ ! -e "$other" ] || die "Another Tailscale installation exists: $other. Resolve migration locally first."
-  done
+  other=$(find_tailscale_installations) || die 'Cannot resolve the invoking account home for Tailscale installation checks.'
+  [ -z "$other" ] || die "Another Tailscale installation exists: $other. Resolve migration locally first."
 }
 
 # Both profiles require these power settings. Used by local setup, SSH setup,
@@ -677,16 +730,19 @@ if [ "$MODE" = check ]; then
   SSH_PREF=unknown
   TS_SSH_RUNNING=unknown
 
-  # Recognize the app in its usual installation location instead of calling it
-  # missing. Its presence does not prove it is running. The intended setup uses
-  # Homebrew tailscaled to start before desktop login. Do not run an app CLI or
-  # switch installations here; continue checking the other system settings.
-  if [ -d /Applications/Tailscale.app ]; then
-    fail 'Tailscale app found at /Applications/Tailscale.app; expected the Homebrew daemon setup'
-    printf 'INFO     The intended Homebrew daemon starts before desktop login. The app is a different installation.\n'
-    if [ -x "$TS" ]; then
-      printf 'INFO     The expected Homebrew CLI also exists; review which installation is in use.\n'
-    fi
+  # Report all competing markers and continue other diagnostics. Do not query a
+  # possibly competing CLI when discovery is incomplete or a marker is present.
+  TS_INSTALLATION_OK=true
+  COMPETING_TS=$(find_tailscale_installations) || {
+    unknown 'Cannot resolve the invoking account home for Tailscale installation checks'
+    TS_INSTALLATION_OK=false
+  }
+  while IFS= read -r other; do
+    [ -n "$other" ] || continue
+    fail "Another Tailscale installation exists: $other. Resolve migration locally first."
+    TS_INSTALLATION_OK=false
+  done <<< "$COMPETING_TS"
+  if [ "$TS_INSTALLATION_OK" != true ]; then
     printf 'INFO     Tailscale status/preferences queries skipped; no installation was changed.\n'
   elif [ -x "$TS" ]; then          # Query only the expected Homebrew CLI
     if read_tailscale status --json >"$TMP/status" 2>"$TMP/status.err"; then
@@ -739,13 +795,95 @@ if [ "$MODE" = check ]; then
   # -----------------------------------------------------------
   # Require the plist file and a running service in launchd's system domain.
   # This verifies current state, not that a future reboot will succeed.
+  SERVICE_RUNNING=false
   if [ -f /Library/LaunchDaemons/homebrew.mxcl.tailscale.plist ] &&
                                   # True if Tailscale’s boot-time launchd plist file exists
      launchctl print system/homebrew.mxcl.tailscale >"$TMP/service" 2>/dev/null &&
                                   # Dump the root-domain service's live state to a temp file
-     grep -q 'state = running' "$TMP/service"; then pass 'Tailscale system boot service running';
+     grep -q 'state = running' "$TMP/service"; then
+    SERVICE_RUNNING=true
+    pass 'Tailscale system boot service running'
                                   # If the dump says "running", report PASS
   else fail 'Expected Homebrew Tailscale startup service is missing or stopped'; fi
+
+  # Inspect files without executing the daemon or changing ownership. stat -L
+  # follows symlinks, so these checks inspect the currently linked target.
+  # They deliberately do not claim that writable ancestors/ACLs are safe.
+  check_root_permissions() {
+    local path=$1 label=$2 kind=$3 metadata owner permissions
+    if [ ! -e "$path" ]; then
+      fail "$label missing or dangling: $path"
+    elif { [ "$kind" = file ] && { [ ! -f "$path" ] || [ ! -x "$path" ]; }; } ||
+         { [ "$kind" = directory ] && [ ! -d "$path" ]; }; then
+      fail "$label has the wrong type or is not executable: $path"
+    elif metadata=$(stat -L -f '%u %Lp' "$path" 2>/dev/null) &&
+         [[ "$metadata" =~ ^[0-9]+[[:space:]][0-7]{1,4}$ ]]; then
+      owner=${metadata%% *}; permissions=${metadata#* }
+      if [ "$owner" = 0 ] && [ "$((8#$permissions & 0022))" = 0 ]; then
+        pass "$label root-owned; Unix group/other write bits clear (limited check)"
+      else
+        fail "$label permissions: uid=$owner mode=$permissions; expected root and no group/other write bits"
+      fi
+    else
+      unknown "Cannot read $label ownership/mode: $path"
+    fi
+  }
+  check_boot_plist() {
+    local plist=$1 expected=$2 program username
+    if [ ! -f "$plist" ]; then
+      fail "Tailscale boot plist missing: $plist"
+      return
+    fi
+    # The plist need not be executable, unlike the daemon.
+    check_root_permissions "$plist" 'Tailscale boot plist' plist
+    if ! plutil -lint "$plist" >/dev/null 2>&1; then
+      unknown 'Cannot parse Tailscale boot plist'
+      return
+    fi
+    # launchd gives Program precedence over ProgramArguments[0]. A present but
+    # malformed Program must not silently fall back to the argument array.
+    if plutil -type Program "$plist" >/dev/null 2>&1; then
+      program=$(plutil -extract Program raw -expect string -o - "$plist" 2>/dev/null) || {
+        unknown 'Cannot read Tailscale boot plist Program'; return;
+      }
+    else
+      program=$(plutil -extract ProgramArguments.0 raw -expect string -o - "$plist" 2>/dev/null) || {
+        unknown 'Cannot read Tailscale boot plist ProgramArguments.0'; return;
+      }
+    fi
+    if [ "$program" = "$expected" ]; then
+      pass 'Tailscale boot plist selects the expected Homebrew daemon path'
+    else
+      fail "Tailscale boot plist selects an unexpected program: $program"
+    fi
+    if plutil -type UserName "$plist" >/dev/null 2>&1; then
+      if username=$(plutil -extract UserName raw -expect string -o - "$plist" 2>/dev/null); then
+        [ "$username" = root ] && pass 'Tailscale boot plist selects root' ||
+          fail "Tailscale boot plist selects non-root UserName: $username"
+      else unknown 'Cannot read Tailscale boot plist UserName'; fi
+    else pass 'Tailscale system boot plist uses the default root user'; fi
+  }
+  EXPECTED_DAEMON="${BREW%/bin/brew}/opt/tailscale/bin/tailscaled"
+  printf '\nTailscale launch files (limited read-only checks)\n'
+  PERMISSION_FAILURES=$BAD
+  check_boot_plist /Library/LaunchDaemons/homebrew.mxcl.tailscale.plist "$EXPECTED_DAEMON"
+  if [ "$SERVICE_RUNNING" = true ]; then
+    LOADED_PROGRAM=$(sed -n 's/^[[:space:]]*program = //p' "$TMP/service" | head -n 1)
+    if [ -z "$LOADED_PROGRAM" ]; then
+      unknown 'Cannot read loaded Tailscale program path from launchctl'
+    elif [ "$LOADED_PROGRAM" = "$EXPECTED_DAEMON" ]; then
+      pass 'Loaded Tailscale service selects the expected Homebrew daemon path'
+    else fail "Loaded Tailscale service selects an unexpected program: $LOADED_PROGRAM"; fi
+  fi
+  printf 'INFO     Linked daemon inspected: %s\n' "$EXPECTED_DAEMON"
+  check_root_permissions "$EXPECTED_DAEMON" 'Tailscale linked daemon' file
+  check_root_permissions "${EXPECTED_DAEMON%/*}" 'Tailscale linked bin directory' directory
+  printf 'INFO     Limited file checks: no parent-directory, ACL, integrity or running-version audit.\n'
+  printf 'INFO     The Homebrew account can still replace launch paths; passing does not guarantee safe future launches. See UPDATES AND LIMITS.\n'
+  if [ "$BAD" != "$PERMISSION_FAILURES" ]; then
+    printf 'MANUAL   Review UPDATES AND LIMITS. After an upgrade, complete the planned service restart with a recovery path, then recheck.\n'
+    printf 'INFO     No ownership repairs or service restarts were attempted.\n'
+  fi
 
   # Both profiles require computer sleep off and restart after power failure on.
   if pmset -g custom >"$TMP/power" 2>/dev/null; then
@@ -838,7 +976,7 @@ if [ "$MODE" = check ]; then
     LATEST_VERSION=$(field "$TMP/brew-release" tag_name || true)
     report_update Homebrew "$INSTALLED_VERSION" "${LATEST_VERSION#v}"
   else printf 'INFO     Homebrew update check unavailable (version query or online lookup failed)\n'; fi
-  if [ -d /Applications/Tailscale.app ] || [ ! -x "$TS" ]; then
+  if [ "$TS_INSTALLATION_OK" != true ] || [ ! -x "$TS" ]; then
     printf 'INFO     Tailscale update check skipped (expected Homebrew-only installation unavailable)\n'
   elif read_tailscale version >"$TMP/ts-version" 2>"$TMP/ts-version.err" &&
        fetch_release https://formulae.brew.sh/api/formula/tailscale.json "$TMP/ts-release" 2>"$TMP/ts-release.err"; then
